@@ -13,3 +13,5 @@ pub trait ServerBackend: Clone {
 
     async fn upload_photos(photos: Vec<RgbaImage>) -> Result<(), Self::Error>;
 }
+
+pub type DefaultServerBackend = mock::MockBackend;

@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use backend::cameras::{nokhwa::NokhwaBackend, CameraBackend};
+use backend::{
+    cameras::{CameraBackend, DefaultCameraBackend},
+    servers::{DefaultServerBackend, ServerBackend},
+};
 use frontend::{
     main_app::{MainApp, MainAppMessage},
     setup::{Setup, SetupMessage},
@@ -94,9 +97,11 @@ impl<C: crate::backend::cameras::CameraBackend + 'static + Clone> PhotoBoothAppl
 }
 
 fn main() -> iced::Result {
-    type CameraBackend = NokhwaBackend;
+    type CameraBackend = DefaultCameraBackend;
+    type ServerBackend = DefaultServerBackend;
 
     CameraBackend::initialize().expect("failed to initialize camera backend");
+    ServerBackend::initialize().expect("failed to initialize server backend");
 
     iced::application(
         "Photo Booth v2",

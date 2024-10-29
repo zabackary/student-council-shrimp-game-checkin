@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use anim::Animation;
 use iced::{
-    widget::{container, image::Handle, text, Container},
+    widget::{container, image::Handle, progress_bar, text, vertical_space, Container},
     ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
@@ -184,7 +186,15 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
                                                 .begin_animation(),
                                     }
                                 } else {
-                                    todo!()
+                                    self.state = MainAppState::Uploading {
+                                        progress_timeline: anim::Options::new(0.0, 0.8)
+                                            .duration(Duration::from_millis(1000))
+                                            .easing(
+                                                anim::easing::cubic_ease()
+                                                    .mode(anim::easing::EasingMode::Out),
+                                            )
+                                            .begin_animation(),
+                                    };
                                 }
                             }
                         }
@@ -233,16 +243,14 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
                 .height(Length::Fill)
                 .into(),
             match &self.state {
-                MainAppState::PaymentRequired => {
-                    title_overlay(title_text("Photo Booth, only 1 ticket!")).into()
-                }
+                MainAppState::PaymentRequired => title_overlay(title_text("Photo booth")).into(),
                 MainAppState::Preview => {
                     title_text("Press [SPACE] to start taking pictures!").into()
                 }
                 MainAppState::CapturePhotosPrepare { ready_timeline } => {
                     animations::ready::view(ready_timeline.value()).into()
                 }
-                MainAppState::CapturePhotos { current, state } => match state {
+                MainAppState::CapturePhotos { current: _, state } => match state {
                     CapturePhotosState::Countdown {
                         current,
                         countdown_timeline,
@@ -260,7 +268,12 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
                     }
                 },
                 MainAppState::Uploading { progress_timeline } => {
-                    title_overlay(title_text("Your photos are being uploaded.")).into()
+                    title_overlay(iced::widget::column([
+                        title_text("Your photos are being uploaded.").into(),
+                        vertical_space().height(4.0).into(),
+                        progress_bar(0.0..=1.0, progress_timeline.value()).into(),
+                    ]))
+                    .into()
                 }
                 MainAppState::EditPrintUpsellBanner { animation_timeline } => title_overlay(
                     title_text("Edit and download your photo at the nearby kiosk"),

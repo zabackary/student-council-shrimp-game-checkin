@@ -20,3 +20,5 @@ pub trait CameraBackendCamera: Send {
     fn capture_video_frame(&mut self) -> Result<image::RgbaImage, Self::Error>;
     fn capture_still_frame(&mut self) -> Result<image::RgbaImage, Self::Error>;
 }
+
+pub type DefaultCameraBackend = nokhwa::NokhwaBackend;
