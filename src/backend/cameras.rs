@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display};
 
+pub mod gphoto2;
 pub mod nokhwa;
 
 pub trait CameraBackend: Clone {

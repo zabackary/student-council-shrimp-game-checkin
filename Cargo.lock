@@ -963,6 +963,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1625,6 +1634,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gphoto2"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3efbd771f04eaa3f399aa31862f028f1b0d4772a640cb7853e46ca2e9fbb83d9"
+dependencies = [
+ "crossbeam-channel",
+ "libc",
+ "libgphoto2_sys",
+ "log",
+]
+
+[[package]]
 name = "gpu-alloc"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,6 +2256,16 @@ dependencies = [
  "arbitrary",
  "cc",
  "once_cell",
+]
+
+[[package]]
+name = "libgphoto2_sys"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63434be819e4b8933a4df944b3033a1799259f1e37b219a4fb11f2fc01123a9e"
+dependencies = [
+ "bindgen",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3218,6 +3249,7 @@ name = "photo-booth-v2"
 version = "0.1.0"
 dependencies = [
  "anim",
+ "gphoto2",
  "iced",
  "image 0.25.2",
  "nokhwa",
