@@ -192,7 +192,7 @@ impl<
                     } => {
                         if preview_timeline.update().is_completed() {
                             *current += 1;
-                            if *current < 3 {
+                            if *current <= 3 {
                                 *state = CapturePhotosState::Countdown {
                                     current: 3,
                                     countdown_timeline: animations::countdown_circle::animation()
@@ -201,7 +201,7 @@ impl<
                                 Task::none()
                             } else {
                                 self.state = MainAppState::Uploading {
-                                    progress_timeline: anim::Options::new(0.0, 0.8)
+                                    progress_timeline: anim::Options::new(0.0, 0.6)
                                         .duration(Duration::from_millis(8000))
                                         .easing(
                                             anim::easing::cubic_ease()
@@ -224,10 +224,11 @@ impl<
                     if progress_timeline.update().is_completed() && progress_timeline.value() == 1.0
                     {
                         self.state = MainAppState::EditPrintUpsellBanner {
-                            animation_timeline: anim::Options::new(0.0, 0.8)
+                            animation_timeline: anim::Options::new(0.0, 0.6)
                                 .duration(Duration::from_millis(5000))
                                 .easing(
-                                    anim::easing::cubic_ease().mode(anim::easing::EasingMode::Out),
+                                    anim::easing::cubic_ease()
+                                        .mode(anim::easing::EasingMode::InOut),
                                 )
                                 .begin_animation(),
                         }
@@ -244,10 +245,18 @@ impl<
                 MainAppState::Uploading {
                     ref mut progress_timeline,
                 } => {
-                    *progress_timeline = anim::Options::new(progress_timeline.value(), 0.8)
-                        .duration(Duration::from_millis(500))
-                        .easing(anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut))
-                        .begin_animation();
+                    match result {
+                        Ok(_handle) => {
+                            *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
+                                .duration(Duration::from_millis(500))
+                                .easing(
+                                    anim::easing::cubic_ease()
+                                        .mode(anim::easing::EasingMode::InOut),
+                                )
+                                .begin_animation();
+                        }
+                        Err(err) => panic!("something went wrong: {}", err),
+                    }
                     Task::none()
                 }
                 _ => Task::none(),

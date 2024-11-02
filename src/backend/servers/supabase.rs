@@ -69,7 +69,6 @@ async fn upload_file(
         }).to_string()).headers(metadata_headers))
         // yay, big allocation
         .part("", Part::bytes(content.to_owned()).headers(content_headers));
-    println!("posting...");
     client
         .post("https://www.googleapis.com/upload/drive/v3/files")
         .query(&[("uploadType", "multipart")])
@@ -147,18 +146,15 @@ impl super::ServerBackend for SupabaseBackend {
         self,
         photos: Vec<RgbaImage>,
     ) -> Result<Self::UploadHandle, Self::Error> {
-        println!("preparing upload");
         let service_account = gcp_auth::CustomServiceAccount::from_json(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/service_account_key.json"
         )))
         .map_err(SupabaseBackendError::GcpAuth)?;
-        println!("loading account token");
         let token = service_account
             .token(&["https://www.googleapis.com/auth/drive"])
             .await
             .map_err(SupabaseBackendError::GcpAuth)?;
-        println!("done account");
         let now = chrono::offset::Local::now().to_string();
         let mut urls = Vec::new();
         for (i, photo) in photos.iter().enumerate() {
@@ -167,7 +163,6 @@ impl super::ServerBackend for SupabaseBackend {
             photo
                 .write_to(&mut encoded_cursor, image::ImageFormat::WebP)
                 .map_err(SupabaseBackendError::Encode)?;
-            println!("encoded {i}");
             let file = upload_file(
                 &encoded,
                 "image/webp",
@@ -179,27 +174,7 @@ impl super::ServerBackend for SupabaseBackend {
             .await
             .map_err(SupabaseBackendError::Reqwest)?;
             urls.push(format!("https://drive.google.com/uc?id={}", file.id));
-            println!("uploaded {i}");
         }
-        println!("done photo upload");
-        println!(
-            "{:?}",
-            self.client
-                .post(format!(
-                    "{}/functions/v1/{}",
-                    dotenv!("SUPABASE_ENDPOINT"),
-                    INSERT_TAKE_ENDPOINT
-                ))
-                .query(&[
-                    ("rawUrls", urls.join(",")),
-                    ("instanceId", self.config.id.clone()),
-                ])
-                .send()
-                .await
-                .map_err(SupabaseBackendError::Reqwest)?
-                .text()
-                .await
-        );
         #[derive(Debug, serde::Serialize, serde::Deserialize)]
         struct Id {
             id: String,
