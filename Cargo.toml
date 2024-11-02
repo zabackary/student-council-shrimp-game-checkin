@@ -21,6 +21,15 @@ serde = "1.0.210"
 serde_json = "1.0.128"
 tokio = { version = "1.40.0", features = ["full"] }
 gphoto2 = "3.3.1"
+reqwest = { version = "0.12.9", features = [
+  "blocking",
+  "json",
+  "multipart",
+  "stream",
+] }
+gcp_auth = "0.12.3"
+chrono = "0.4.38"
+dotenv_codegen = "0.15.0"
 
 
 # The following lines from https://bevyengine.org/learn/quick-start/getting-started/setup/

@@ -6,7 +6,9 @@ use iced::{
     Color, Length,
 };
 
-pub const ANIMATION_LENGTH: u64 = 400;
+use super::LENGTH_DIVISOR;
+
+pub const ANIMATION_LENGTH: u64 = 400 / LENGTH_DIVISOR;
 
 #[derive(Debug, Clone, Copy, Animatable)]
 pub struct AnimationState {

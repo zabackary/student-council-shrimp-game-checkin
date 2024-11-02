@@ -13,13 +13,20 @@ pub enum SetupMessage<C: crate::backend::cameras::CameraBackend + 'static> {
     StartPressed,
 }
 
-pub struct Setup<C: crate::backend::cameras::CameraBackend + 'static> {
+pub struct Setup<
+    C: crate::backend::cameras::CameraBackend + 'static,
+    S: crate::backend::servers::ServerBackend + 'static,
+> {
     camera_options: Vec<C::EnumeratedCamera>,
     camera_option: Option<C::EnumeratedCamera>,
-    pub new_page: Option<Box<(AppPage<C>, Task<PhotoBoothMessage<C>>)>>,
+    pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
-impl<C: crate::backend::cameras::CameraBackend + 'static> Setup<C> {
+impl<
+        C: crate::backend::cameras::CameraBackend + 'static,
+        S: crate::backend::servers::ServerBackend + 'static,
+    > Setup<C, S>
+{
     pub fn new() -> Self {
         Self {
             camera_options: C::enumerate_cameras().unwrap(),

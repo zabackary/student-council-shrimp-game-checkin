@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anim::Animation;
 use iced::{
-    widget::{container, image::Handle, progress_bar, text, vertical_space, Container},
+    widget::{image::Handle, progress_bar, vertical_space},
     ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
@@ -51,21 +51,29 @@ enum MainAppState {
 }
 
 #[derive(Debug, Clone)]
-pub enum MainAppMessage {
+pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     Camera(super::camera_feed::CameraMessage),
     Tick,
     SpaceReleased,
     CaptureStill,
+    Uploaded(Result<S::UploadHandle, String>),
 }
 
-pub struct MainApp<C: crate::backend::cameras::CameraBackend + 'static> {
+pub struct MainApp<
+    C: crate::backend::cameras::CameraBackend + 'static,
+    S: crate::backend::servers::ServerBackend + 'static,
+> {
     feed: CameraFeed<C::Camera>,
     state: MainAppState,
     captured_photos: Vec<RgbaImage>,
-    pub new_page: Option<Box<(AppPage<C>, Task<PhotoBoothMessage<C>>)>>,
+    pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
-impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
+impl<
+        C: crate::backend::cameras::CameraBackend + 'static,
+        S: crate::backend::servers::ServerBackend + 'static,
+    > MainApp<C, S>
+{
     pub fn new(feed: CameraFeed<C::Camera>) -> Self {
         Self {
             feed,
@@ -75,7 +83,11 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
         }
     }
 
-    pub fn update(&mut self, message: MainAppMessage) -> Task<MainAppMessage> {
+    pub fn update(
+        &mut self,
+        message: MainAppMessage<S>,
+        server_backend: S,
+    ) -> Task<MainAppMessage<S>> {
         self.feed.update_options(
             if matches!(
                 self.state,
@@ -122,93 +134,124 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
                 }
                 Task::none()
             }
-            MainAppMessage::Tick => {
-                match &mut self.state {
-                    MainAppState::CapturePhotosPrepare { ready_timeline } => {
-                        if ready_timeline.update().is_completed() {
-                            self.state = MainAppState::CapturePhotos {
-                                current: 0,
-                                state: CapturePhotosState::Countdown {
+            MainAppMessage::Tick => match &mut self.state {
+                MainAppState::CapturePhotosPrepare { ready_timeline } => {
+                    if ready_timeline.update().is_completed() {
+                        self.state = MainAppState::CapturePhotos {
+                            current: 0,
+                            state: CapturePhotosState::Countdown {
+                                current: 3,
+                                countdown_timeline: animations::countdown_circle::animation()
+                                    .begin_animation(),
+                            },
+                        }
+                    };
+                    Task::none()
+                }
+                MainAppState::CapturePhotos { state, current } => match state {
+                    CapturePhotosState::Countdown {
+                        current,
+                        countdown_timeline,
+                    } => {
+                        if countdown_timeline.update().is_completed() {
+                            *current -= 1;
+                            if *current == 0 {
+                                *state = CapturePhotosState::Capture {
+                                    capture_timeline: animations::capture_flash::animation()
+                                        .to_timeline(),
+                                };
+                                return Task::done(MainAppMessage::CaptureStill);
+                            } else {
+                                *countdown_timeline =
+                                    animations::countdown_circle::animation().begin_animation();
+                            }
+                        };
+                        Task::none()
+                    }
+                    CapturePhotosState::Capture { capture_timeline } => {
+                        if capture_timeline.update().is_completed() {
+                            let last_photo = self
+                                .captured_photos
+                                .last()
+                                .expect("capture didn't complete")
+                                .clone();
+                            *state = CapturePhotosState::Preview {
+                                preview_timeline: animations::capture_preview::animation()
+                                    .begin_animation(),
+                                captured_handle: Handle::from_rgba(
+                                    last_photo.width(),
+                                    last_photo.height(),
+                                    last_photo.into_raw(),
+                                ),
+                            }
+                        };
+                        Task::none()
+                    }
+                    CapturePhotosState::Preview {
+                        preview_timeline, ..
+                    } => {
+                        if preview_timeline.update().is_completed() {
+                            *current += 1;
+                            if *current < 3 {
+                                *state = CapturePhotosState::Countdown {
                                     current: 3,
                                     countdown_timeline: animations::countdown_circle::animation()
                                         .begin_animation(),
-                                },
-                            }
-                        }
-                    }
-                    MainAppState::CapturePhotos { state, current } => match state {
-                        CapturePhotosState::Countdown {
-                            current,
-                            countdown_timeline,
-                        } => {
-                            if countdown_timeline.update().is_completed() {
-                                *current -= 1;
-                                if *current == 0 {
-                                    *state = CapturePhotosState::Capture {
-                                        capture_timeline: animations::capture_flash::animation()
-                                            .to_timeline(),
-                                    };
-                                    return Task::done(MainAppMessage::CaptureStill);
-                                } else {
-                                    *countdown_timeline =
-                                        animations::countdown_circle::animation().begin_animation();
-                                }
-                            }
-                        }
-                        CapturePhotosState::Capture { capture_timeline } => {
-                            if capture_timeline.update().is_completed() {
-                                let last_photo = self
-                                    .captured_photos
-                                    .last()
-                                    .expect("capture didn't complete")
-                                    .clone();
-                                *state = CapturePhotosState::Preview {
-                                    preview_timeline: animations::capture_preview::animation()
+                                };
+                                Task::none()
+                            } else {
+                                self.state = MainAppState::Uploading {
+                                    progress_timeline: anim::Options::new(0.0, 0.8)
+                                        .duration(Duration::from_millis(8000))
+                                        .easing(
+                                            anim::easing::cubic_ease()
+                                                .mode(anim::easing::EasingMode::Out),
+                                        )
                                         .begin_animation(),
-                                    captured_handle: Handle::from_rgba(
-                                        last_photo.width(),
-                                        last_photo.height(),
-                                        last_photo.into_raw(),
-                                    ),
-                                }
+                                };
+                                let old = self.captured_photos.drain(..).collect();
+                                let future = server_backend.upload_photos(old);
+                                Task::perform(future, |result| {
+                                    MainAppMessage::Uploaded(result.map_err(|x| x.to_string()))
+                                })
                             }
+                        } else {
+                            Task::none()
                         }
-                        CapturePhotosState::Preview {
-                            preview_timeline, ..
-                        } => {
-                            if preview_timeline.update().is_completed() {
-                                *current += 1;
-                                if *current < 3 {
-                                    *state = CapturePhotosState::Countdown {
-                                        current: 3,
-                                        countdown_timeline:
-                                            animations::countdown_circle::animation()
-                                                .begin_animation(),
-                                    }
-                                } else {
-                                    self.state = MainAppState::Uploading {
-                                        progress_timeline: anim::Options::new(0.0, 0.8)
-                                            .duration(Duration::from_millis(1000))
-                                            .easing(
-                                                anim::easing::cubic_ease()
-                                                    .mode(anim::easing::EasingMode::Out),
-                                            )
-                                            .begin_animation(),
-                                    };
-                                }
-                            }
+                    }
+                },
+                MainAppState::Uploading { progress_timeline } => {
+                    if progress_timeline.update().is_completed() && progress_timeline.value() == 1.0
+                    {
+                        self.state = MainAppState::EditPrintUpsellBanner {
+                            animation_timeline: anim::Options::new(0.0, 0.8)
+                                .duration(Duration::from_millis(5000))
+                                .easing(
+                                    anim::easing::cubic_ease().mode(anim::easing::EasingMode::Out),
+                                )
+                                .begin_animation(),
                         }
-                    },
-                    MainAppState::Uploading { progress_timeline } => {
-                        progress_timeline.update();
                     }
-                    MainAppState::EditPrintUpsellBanner { animation_timeline } => {
-                        animation_timeline.update();
-                    }
-                    _ => {}
-                };
-                Task::none()
-            }
+                    Task::none()
+                }
+                MainAppState::EditPrintUpsellBanner { animation_timeline } => {
+                    animation_timeline.update();
+                    Task::none()
+                }
+                _ => Task::none(),
+            },
+            MainAppMessage::Uploaded(result) => match self.state {
+                MainAppState::Uploading {
+                    ref mut progress_timeline,
+                } => {
+                    *progress_timeline = anim::Options::new(progress_timeline.value(), 0.8)
+                        .duration(Duration::from_millis(500))
+                        .easing(anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut))
+                        .begin_animation();
+                    Task::none()
+                }
+                _ => Task::none(),
+            },
             MainAppMessage::SpaceReleased => {
                 match &mut self.state {
                     MainAppState::Preview => {
@@ -223,7 +266,7 @@ impl<C: crate::backend::cameras::CameraBackend + 'static> MainApp<C> {
         }
     }
 
-    pub fn view(&self) -> Element<MainAppMessage> {
+    pub fn view(&self) -> Element<MainAppMessage<S>> {
         iced::widget::stack([
             self.feed
                 .view()

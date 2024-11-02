@@ -13,25 +13,39 @@ use iced::{keyboard::Key, Task};
 mod backend;
 mod frontend;
 
-enum AppPage<C: crate::backend::cameras::CameraBackend + 'static> {
-    Setup(Setup<C>),
-    MainApp(MainApp<C>),
+enum AppPage<
+    C: crate::backend::cameras::CameraBackend + 'static,
+    S: crate::backend::servers::ServerBackend + 'static,
+> {
+    Setup(Setup<C, S>),
+    MainApp(MainApp<C, S>),
 }
 
-struct PhotoBoothApplication<C: crate::backend::cameras::CameraBackend + 'static> {
-    page: AppPage<C>,
+struct PhotoBoothApplication<
+    C: crate::backend::cameras::CameraBackend + 'static,
+    S: crate::backend::servers::ServerBackend + 'static,
+> {
+    page: AppPage<C, S>,
+    server_backend: S,
 }
 
 #[derive(Debug, Clone)]
-enum PhotoBoothMessage<C: crate::backend::cameras::CameraBackend + 'static> {
+enum PhotoBoothMessage<
+    C: crate::backend::cameras::CameraBackend + 'static,
+    S: crate::backend::servers::ServerBackend + 'static,
+> {
     Setup(SetupMessage<C>),
-    MainApp(MainAppMessage),
+    MainApp(MainAppMessage<S>),
     Tick,
     SpaceReleased,
 }
 
-impl<C: crate::backend::cameras::CameraBackend + 'static + Clone> PhotoBoothApplication<C> {
-    fn update(&mut self, message: PhotoBoothMessage<C>) -> Task<PhotoBoothMessage<C>> {
+impl<
+        C: crate::backend::cameras::CameraBackend + 'static + Clone,
+        S: crate::backend::servers::ServerBackend + 'static,
+    > PhotoBoothApplication<C, S>
+{
+    fn update(&mut self, message: PhotoBoothMessage<C, S>) -> Task<PhotoBoothMessage<C, S>> {
         match message {
             PhotoBoothMessage::Setup(msg) => match &mut self.page {
                 AppPage::Setup(page) => {
@@ -48,7 +62,9 @@ impl<C: crate::backend::cameras::CameraBackend + 'static + Clone> PhotoBoothAppl
             },
             PhotoBoothMessage::MainApp(msg) => match &mut self.page {
                 AppPage::MainApp(page) => {
-                    let update_task = page.update(msg).map(PhotoBoothMessage::MainApp);
+                    let update_task = page
+                        .update(msg, self.server_backend.clone())
+                        .map(PhotoBoothMessage::MainApp);
                     if let Some(new_page) = page.new_page.take() {
                         let (new_page, new_task) = *new_page;
                         self.page = new_page;
@@ -61,27 +77,27 @@ impl<C: crate::backend::cameras::CameraBackend + 'static + Clone> PhotoBoothAppl
             },
             PhotoBoothMessage::Tick => match &mut self.page {
                 AppPage::MainApp(page) => page
-                    .update(MainAppMessage::Tick)
+                    .update(MainAppMessage::Tick, self.server_backend.clone())
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
             PhotoBoothMessage::SpaceReleased => match &mut self.page {
                 AppPage::MainApp(page) => page
-                    .update(MainAppMessage::SpaceReleased)
+                    .update(MainAppMessage::SpaceReleased, self.server_backend.clone())
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
         }
     }
 
-    fn view(&self) -> iced::Element<PhotoBoothMessage<C>> {
+    fn view(&self) -> iced::Element<PhotoBoothMessage<C, S>> {
         match &self.page {
             AppPage::MainApp(page) => page.view().map(PhotoBoothMessage::MainApp),
             AppPage::Setup(page) => page.view().map(PhotoBoothMessage::Setup),
         }
     }
 
-    fn subscription(&self) -> iced::Subscription<PhotoBoothMessage<C>> {
+    fn subscription(&self) -> iced::Subscription<PhotoBoothMessage<C, S>> {
         const FPS: f32 = 30.0;
         iced::Subscription::batch([
             iced::time::every(Duration::from_secs_f32(1.0 / FPS))
@@ -101,7 +117,6 @@ fn main() -> iced::Result {
     type ServerBackend = DefaultServerBackend;
 
     CameraBackend::initialize().expect("failed to initialize camera backend");
-    ServerBackend::initialize().expect("failed to initialize server backend");
 
     iced::application(
         "Photo Booth v2",
@@ -110,9 +125,11 @@ fn main() -> iced::Result {
     )
     .subscription(PhotoBoothApplication::subscription)
     .run_with(|| {
+        let server_backend = ServerBackend::new().expect("failed to initialize server backend");
         (
-            PhotoBoothApplication::<CameraBackend> {
+            PhotoBoothApplication::<CameraBackend, ServerBackend> {
                 page: AppPage::Setup(Setup::new()),
+                server_backend,
             },
             Task::none(),
         )

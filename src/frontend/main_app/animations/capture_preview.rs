@@ -8,7 +8,9 @@ use iced::{
 
 use crate::frontend::main_app::PHOTO_ASPECT_RATIO;
 
-pub const ANIMATION_LENGTH: u64 = 3000;
+use super::LENGTH_DIVISOR;
+
+pub const ANIMATION_LENGTH: u64 = 3000 / LENGTH_DIVISOR;
 
 #[derive(Debug, Clone, Copy, Animatable)]
 pub struct AnimationState {
