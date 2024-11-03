@@ -78,4 +78,5 @@ pub fn view<'a, Message: 'static>(
         .center(Length::Fill)
         .into()
     }))
+    .padding(16)
 }

@@ -415,7 +415,7 @@ impl<
                                     .padding(8)
                                     .into(),
                                 vertical_space().height(12).into(),
-                                container(iced::widget::text("スペースキーを押してね！").size(18))
+                                container(iced::widget::text("スペースキーを押してください。").size(18))
                                     .style(|theme: &iced::Theme| container::Style {
                                         border: iced::Border::default().rounded(f32::MAX),
                                         background: Some(
@@ -523,7 +523,7 @@ impl<
                         .center(Length::Fill)
                         .into(),
                         title_text("Your photos are being uploaded.").into(),
-                        supporting_text("写真はアップロード中").into(),
+                        supporting_text("写真がアップロードされています。").into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(8.0)
@@ -543,9 +543,9 @@ impl<
                             template_preview_timeline.value(),
                         )
                         .into(),
-                        title_text("Edit and download your photo right outside").into(),
+                        title_text("Edit and download your photos right outside").into(),
                         supporting_text(
-                            "エディットやダウンロードをするには、ここを出てすぐのスクリーンをお使用してください",
+                            "入口にお戻りいただくと写真の編集やダウンロードが可能です",
                         )
                         .into(),
                         vertical_space().height(12.0).into(),
