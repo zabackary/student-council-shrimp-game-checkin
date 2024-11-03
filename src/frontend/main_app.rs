@@ -11,7 +11,8 @@ use crate::{AppPage, PhotoBoothMessage};
 
 use super::{
     camera_feed::{CameraFeed, CameraFeedOptions},
-    title_overlay::{title_overlay, title_text},
+    loading_spinners,
+    title_overlay::{supporting_text, title_overlay, title_text},
 };
 
 mod animations;
@@ -334,10 +335,16 @@ impl<
                 .height(Length::Fill)
                 .into(),
             match &self.state {
-                MainAppState::PaymentRequired => title_overlay(title_text("Photo booth")).into(),
-                MainAppState::Preview => {
-                    title_text("Press [SPACE] to start taking pictures!").into()
+                MainAppState::PaymentRequired => {
+                    title_overlay(title_text("Photo booth"), false).into()
                 }
+                MainAppState::Preview => title_overlay(
+                    column([
+                        title_text("Press the space key to start taking pictures!").into(),
+                        supporting_text("スペースキーを押してから、写真を取り始まります！").into(),
+                    ]),
+                    true,
+                ),
                 MainAppState::CapturePhotosPrepare { ready_timeline } => {
                     animations::ready::view(ready_timeline.value()).into()
                 }
@@ -358,23 +365,38 @@ impl<
                             .into()
                     }
                 },
-                MainAppState::Uploading { progress_timeline } => {
-                    title_overlay(iced::widget::column([
+                MainAppState::Uploading { progress_timeline } => title_overlay(
+                    iced::widget::column([
+                        container(
+                            loading_spinners::Circular::new()
+                                .size(96.0)
+                                .bar_height(10.0)
+                                .easing(&loading_spinners::easing::STANDARD_DECELERATE),
+                        )
+                        .center(Length::Fill)
+                        .into(),
                         title_text("Your photos are being uploaded.").into(),
+                        supporting_text("写真はアップロード中").into(),
                         vertical_space().height(4.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value()).into(),
-                    ]))
-                    .into()
-                }
-                MainAppState::EditPrintUpsellBanner { animation_timeline } => {
-                    title_overlay(column([
+                    ]),
+                    false,
+                )
+                .into(),
+                MainAppState::EditPrintUpsellBanner { animation_timeline } => title_overlay(
+                    column([
                         container(iced::widget::image(&self.previews[0]))
                             .center(Length::Fill)
                             .into(),
                         title_text("Edit and download your photo at the nearby kiosk").into(),
-                    ]))
-                    .into()
-                }
+                        supporting_text(
+                            "エディットやダウンロードをするには、お近くのキオスクへお回りください",
+                        )
+                        .into(),
+                    ]),
+                    false,
+                )
+                .into(),
             },
         ])
         .into()
