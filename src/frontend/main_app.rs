@@ -434,9 +434,8 @@ impl<
                                         container(
                                             column([
                                                 iced::widget::text("The booth has not been unlocked. Maybe you haven't payed?").size(12).into(),
-                                                iced::widget::text("ロックされています。まだ払わなかったかもしれない？").size(12).into()
+                                                iced::widget::text("ロックされています。チケットを払いましたか。").size(12).into()
                                             ])
-                                            
                                         )
                                         .style(|theme: &iced::Theme| container::Style {
                                             border: iced::Border::default().rounded(4.0).color(theme.extended_palette().danger.strong.color),
@@ -488,7 +487,7 @@ impl<
                 MainAppState::Preview => title_overlay(
                     column([
                         title_text("Press the space key to start taking pictures!").into(),
-                        supporting_text("スペースキーを押すと、写真を取り始まります！").into(),
+                        supporting_text("スペースキーを押すと、撮影が開始されます。").into(),
                         vertical_space().height(12.0).into(),
                     ]),
                     true,
@@ -544,9 +543,9 @@ impl<
                             template_preview_timeline.value(),
                         )
                         .into(),
-                        title_text("Edit and download your photo at the nearby kiosk").into(),
+                        title_text("Edit and download your photo right outside").into(),
                         supporting_text(
-                            "エディットやダウンロードをするには、お近くのキオスクへお回りください",
+                            "エディットやダウンロードをするには、ここを出てすぐのスクリーンをお使用してください",
                         )
                         .into(),
                         vertical_space().height(12.0).into(),
