@@ -12,14 +12,14 @@ pub struct ServerTemplate {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ServerConfig {
-    id: String,
-    name: String,
-    paid_information: String,
-    paid_information_alt: String,
-    contact_name: String,
-    contact_email: String,
-    paid_is_unlocked: Option<bool>,
-    templates: Vec<ServerTemplate>,
+    pub id: String,
+    pub name: String,
+    pub paid_information: String,
+    pub paid_information_alt: String,
+    pub contact_name: String,
+    pub contact_email: String,
+    pub paid_is_unlocked: Option<bool>,
+    pub templates: Vec<ServerTemplate>,
 }
 
 pub trait ServerBackend: Clone + Send {
@@ -28,7 +28,9 @@ pub trait ServerBackend: Clone + Send {
 
     fn new() -> Result<Self, Self::Error>;
 
-    async fn update(&mut self) -> Result<(), Self::Error>;
+    fn is_unlocked(
+        self,
+    ) -> impl std::future::Future<Output = Result<Option<bool>, Self::Error>> + Send;
 
     fn config(&self) -> &ServerConfig;
 

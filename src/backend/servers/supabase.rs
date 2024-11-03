@@ -9,6 +9,8 @@ use reqwest::{
 };
 use serde_json::json;
 
+use super::ServerConfig;
+
 const INSTANCE_DATA_ENDPOINT: &str = "instance-data";
 const INSERT_TAKE_ENDPOINT: &str = "insert-take";
 const RENDER_TAKE_ENDPOINT: &str = "render-take";
@@ -70,18 +72,19 @@ impl super::ServerBackend for SupabaseBackend {
         })
     }
 
-    fn config(&self) -> &super::ServerConfig {
+    fn config(&self) -> &ServerConfig {
         &self.config
     }
 
-    async fn update(&mut self) -> Result<(), Self::Error> {
-        self.config = self
+    async fn is_unlocked(self) -> Result<Option<bool>, Self::Error> {
+        let config: ServerConfig = self
             .client
             .get(format!(
                 "{}/functions/v1/{}",
                 dotenv!("SUPABASE_ENDPOINT"),
                 INSTANCE_DATA_ENDPOINT
             ))
+            .query(&[("id", self.config.id)])
             .send()
             .await
             .map_err(SupabaseBackendError::Reqwest)?
@@ -90,7 +93,7 @@ impl super::ServerBackend for SupabaseBackend {
             .json()
             .await
             .map_err(SupabaseBackendError::JsonDecode)?;
-        Ok(())
+        Ok(config.paid_is_unlocked)
     }
 
     async fn download_template_previews(

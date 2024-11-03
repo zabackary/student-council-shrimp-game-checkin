@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use anim::Animation;
 use iced::{
-    widget::{column, container, image::Handle, progress_bar, vertical_space},
-    ContentFit, Element, Length, Task,
+    widget::{column, container, image::Handle, progress_bar, row, vertical_space, Space},
+    Alignment, ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
 
@@ -34,7 +34,9 @@ enum CapturePhotosState {
 }
 
 enum MainAppState {
-    PaymentRequired,
+    PaymentRequired {
+        show_error: bool,
+    },
     Preview,
     CapturePhotosPrepare {
         ready_timeline: anim::Timeline<animations::ready::AnimationState>,
@@ -47,7 +49,9 @@ enum MainAppState {
         progress_timeline: anim::Timeline<f32>,
     },
     EditPrintUpsellBanner {
-        animation_timeline: anim::Timeline<f32>,
+        progress_timeline: anim::Timeline<f32>,
+        template_preview_timeline: anim::Timeline<animations::upsell_templates::AnimationState>,
+        template_index: usize,
     },
 }
 
@@ -59,6 +63,7 @@ pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
     PreviewDownloaded(Result<Vec<RgbaImage>, String>),
+    IsUnlockedResponse(Result<Option<bool>, String>),
 }
 
 pub struct MainApp<
@@ -80,7 +85,7 @@ impl<
     pub fn new(feed: CameraFeed<C::Camera>) -> Self {
         Self {
             feed,
-            state: MainAppState::Preview,
+            state: MainAppState::PaymentRequired { show_error: false },
             new_page: None,
             captured_photos: Vec::with_capacity(4),
             previews: Vec::with_capacity(4),
@@ -228,19 +233,30 @@ impl<
                     if progress_timeline.update().is_completed() && progress_timeline.value() == 1.0
                     {
                         self.state = MainAppState::EditPrintUpsellBanner {
-                            animation_timeline: anim::Options::new(0.0, 0.6)
-                                .duration(Duration::from_millis(5000))
-                                .easing(
-                                    anim::easing::cubic_ease()
-                                        .mode(anim::easing::EasingMode::InOut),
-                                )
+                            progress_timeline: anim::Options::new(0.0, 1.0)
+                                .duration(Duration::from_millis(20000))
+                                .easing(anim::easing::linear())
                                 .begin_animation(),
+                            template_preview_timeline: animations::upsell_templates::animation()
+                                .begin_animation(),
+                            template_index: 0,
                         }
                     }
                     Task::none()
                 }
-                MainAppState::EditPrintUpsellBanner { animation_timeline } => {
-                    animation_timeline.update();
+                MainAppState::EditPrintUpsellBanner {
+                    progress_timeline,
+                    template_preview_timeline,
+                    ref mut template_index,
+                } => {
+                    if template_preview_timeline.update().is_completed() {
+                        *template_index += 1;
+                        *template_preview_timeline =
+                            animations::upsell_templates::animation().begin_animation()
+                    }
+                    if progress_timeline.update().is_completed() {
+                        self.state = MainAppState::PaymentRequired { show_error: false };
+                    }
                     Task::none()
                 }
                 _ => Task::none(),
@@ -301,21 +317,53 @@ impl<
                 }
                 _ => Task::none(),
             },
-            MainAppMessage::SpaceReleased => {
-                match &mut self.state {
-                    MainAppState::Preview => {
-                        self.state = MainAppState::CapturePhotosPrepare {
-                            ready_timeline: animations::ready::animation().begin_animation(),
-                        };
+            MainAppMessage::IsUnlockedResponse(result) => match self.state {
+                MainAppState::PaymentRequired { ref mut show_error } => match result {
+                    Ok(maybe_ok) => {
+                        if let Some(is_ok) = maybe_ok {
+                            if is_ok {
+                                self.state = MainAppState::Preview;
+                            } else {
+                                *show_error = true;
+                            }
+                        } else {
+                            self.state = MainAppState::Preview;
+                        }
+                        Task::none()
                     }
-                    _ => {}
-                };
-                Task::none()
-            }
+                    Err(err) => {
+                        panic!("failed to update is_unlocked: {}", err);
+                    }
+                },
+                _ => Task::none(),
+            },
+            MainAppMessage::SpaceReleased => match &mut self.state {
+                MainAppState::PaymentRequired { .. } => {
+                    Task::perform(server_backend.is_unlocked(), |result| {
+                        MainAppMessage::IsUnlockedResponse(result.map_err(|err| err.to_string()))
+                    })
+                }
+                MainAppState::Preview => {
+                    self.state = MainAppState::CapturePhotosPrepare {
+                        ready_timeline: animations::ready::animation().begin_animation(),
+                    };
+                    Task::none()
+                }
+                MainAppState::EditPrintUpsellBanner {
+                    progress_timeline, ..
+                } => {
+                    *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
+                        .duration(Duration::from_millis(1000))
+                        .easing(anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut))
+                        .begin_animation();
+                    Task::none()
+                }
+                _ => Task::none(),
+            },
         }
     }
 
-    pub fn view(&self) -> Element<MainAppMessage<S>> {
+    pub fn view<'a>(&'a self, server_backend: &'a S) -> Element<'a, MainAppMessage<S>> {
         iced::widget::stack([
             self.feed
                 .view()
@@ -335,13 +383,113 @@ impl<
                 .height(Length::Fill)
                 .into(),
             match &self.state {
-                MainAppState::PaymentRequired => {
-                    title_overlay(title_text("Photo booth"), false).into()
-                }
+                MainAppState::PaymentRequired { show_error } => title_overlay(
+                    container(
+                        container(
+                            column([
+                                iced::widget::text("Photo booth")
+                                    .size(42)
+                                    .style(|theme: &iced::Theme| iced::widget::text::Style {
+                                        color: Some(theme.extended_palette().background.base.text),
+                                    })
+                                    .into(),
+                                vertical_space().height(6).into(),
+                                iced::widget::text(&server_backend.config().paid_information)
+                                    .size(18)
+                                    .into(),
+                                iced::widget::text(&server_backend.config().paid_information_alt)
+                                    .size(18)
+                                    .into(),
+                                vertical_space().height(12).into(),
+                                container(iced::widget::text("Press space!").size(18))
+                                    .style(|theme: &iced::Theme| container::Style {
+                                        border: iced::Border::default().rounded(f32::MAX),
+                                        background: Some(
+                                            theme.extended_palette().primary.base.color.into(),
+                                        ),
+                                        text_color: Some(
+                                            theme.extended_palette().primary.base.text,
+                                        ),
+                                        ..Default::default()
+                                    })
+                                    .padding(8)
+                                    .into(),
+                                vertical_space().height(12).into(),
+                                container(iced::widget::text("スペースキーを押してね！").size(18))
+                                    .style(|theme: &iced::Theme| container::Style {
+                                        border: iced::Border::default().rounded(f32::MAX),
+                                        background: Some(
+                                            theme.extended_palette().secondary.base.color.into(),
+                                        ),
+                                        text_color: Some(
+                                            theme.extended_palette().secondary.base.text,
+                                        ),
+                                        ..Default::default()
+                                    })
+                                    .padding(8)
+                                    .into(),
+                                if *show_error {
+                                    column([
+                                        vertical_space().height(12).into(),
+                                        container(
+                                            column([
+                                                iced::widget::text("The booth has not been unlocked. Maybe you haven't payed?").size(12).into(),
+                                                iced::widget::text("ロックされています。まだ払わなかったかもしれない？").size(12).into()
+                                            ])
+                                            
+                                        )
+                                        .style(|theme: &iced::Theme| container::Style {
+                                            border: iced::Border::default().rounded(4.0).color(theme.extended_palette().danger.strong.color),
+                                            background: Some(
+                                                theme
+                                                    .extended_palette()
+                                                    .danger
+                                                    .weak
+                                                    .color
+                                                    .into(),
+                                            ),
+                                            text_color: Some(
+                                                theme.extended_palette().danger.weak.text,
+                                            ),
+                                            ..Default::default()
+                                        })
+                                        .padding(8)
+                                        .into(),
+                                    ])
+                                    .into()
+                                } else {
+                                    Space::new(0, 0).into()
+                                },
+                                vertical_space().height(24).into(),
+                                row([
+                                    iced::widget::text(&server_backend.config().name).into(),
+                                    iced::widget::horizontal_space().into(),
+                                    iced::widget::text(&server_backend.config().contact_name)
+                                        .into(),
+                                ])
+                                .into(),
+                            ])
+                            .align_x(Alignment::Center),
+                        )
+                        .max_width(480)
+                        .padding(18)
+                        .style(|theme: &iced::Theme| container::Style {
+                            border: iced::Border::default().rounded(28),
+                            background: Some(
+                                theme.extended_palette().background.strong.color.into(),
+                            ),
+                            ..Default::default()
+                        }),
+                    )
+                    .center(Length::Fill),
+                    false,
+                )
+                .into(),
                 MainAppState::Preview => title_overlay(
                     column([
                         title_text("Press the space key to start taking pictures!").into(),
-                        supporting_text("スペースキーを押してから、写真を取り始まります！").into(),
+                        supporting_text("スペースキーを押すと、写真を取り始まります！").into(),
+                        vertical_space().height(12.0).into(),
                     ]),
                     true,
                 ),
@@ -377,22 +525,34 @@ impl<
                         .into(),
                         title_text("Your photos are being uploaded.").into(),
                         supporting_text("写真はアップロード中").into(),
-                        vertical_space().height(4.0).into(),
-                        progress_bar(0.0..=1.0, progress_timeline.value()).into(),
+                        vertical_space().height(12.0).into(),
+                        progress_bar(0.0..=1.0, progress_timeline.value())
+                            .height(8.0)
+                            .into(),
                     ]),
                     false,
                 )
                 .into(),
-                MainAppState::EditPrintUpsellBanner { animation_timeline } => title_overlay(
+                MainAppState::EditPrintUpsellBanner {
+                    progress_timeline,
+                    template_preview_timeline,
+                    template_index,
+                } => title_overlay(
                     column([
-                        container(iced::widget::image(&self.previews[0]))
-                            .center(Length::Fill)
-                            .into(),
+                        animations::upsell_templates::view(
+                            &self.previews[template_index % self.previews.len()],
+                            template_preview_timeline.value(),
+                        )
+                        .into(),
                         title_text("Edit and download your photo at the nearby kiosk").into(),
                         supporting_text(
                             "エディットやダウンロードをするには、お近くのキオスクへお回りください",
                         )
                         .into(),
+                        vertical_space().height(12.0).into(),
+                        progress_bar(0.0..=1.0, progress_timeline.value())
+                            .height(4.0)
+                            .into(),
                     ]),
                     false,
                 )

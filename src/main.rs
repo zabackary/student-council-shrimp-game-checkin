@@ -92,7 +92,9 @@ impl<
 
     fn view(&self) -> iced::Element<PhotoBoothMessage<C, S>> {
         match &self.page {
-            AppPage::MainApp(page) => page.view().map(PhotoBoothMessage::MainApp),
+            AppPage::MainApp(page) => page
+                .view(&self.server_backend)
+                .map(PhotoBoothMessage::MainApp),
             AppPage::Setup(page) => page.view().map(PhotoBoothMessage::Setup),
         }
     }
