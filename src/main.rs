@@ -8,7 +8,7 @@ use frontend::{
     main_app::{MainApp, MainAppMessage},
     setup::{Setup, SetupMessage},
 };
-use iced::{keyboard::Key, Task};
+use iced::{keyboard::Key, Font, Task};
 
 mod backend;
 mod frontend;
@@ -124,6 +124,8 @@ fn main() -> iced::Result {
         PhotoBoothApplication::view,
     )
     .subscription(PhotoBoothApplication::subscription)
+    .font(include_bytes!("../assets/NotoSansJP-Regular.ttf"))
+    .default_font(Font::with_name("Noto Sans JP"))
     .run_with(|| {
         let server_backend = ServerBackend::new().expect("failed to initialize server backend");
         (
