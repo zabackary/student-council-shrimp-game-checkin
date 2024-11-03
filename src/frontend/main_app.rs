@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anim::Animation;
 use iced::{
-    widget::{image::Handle, progress_bar, vertical_space},
+    widget::{column, container, image::Handle, progress_bar, vertical_space},
     ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
@@ -57,6 +57,7 @@ pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     SpaceReleased,
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
+    PreviewDownloaded(Result<Vec<RgbaImage>, String>),
 }
 
 pub struct MainApp<
@@ -66,6 +67,7 @@ pub struct MainApp<
     feed: CameraFeed<C::Camera>,
     state: MainAppState,
     captured_photos: Vec<RgbaImage>,
+    previews: Vec<iced::widget::image::Handle>,
     pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
@@ -80,6 +82,7 @@ impl<
             state: MainAppState::Preview,
             new_page: None,
             captured_photos: Vec::with_capacity(4),
+            previews: Vec::with_capacity(4),
         }
     }
 
@@ -244,11 +247,47 @@ impl<
             MainAppMessage::Uploaded(result) => match self.state {
                 MainAppState::Uploading {
                     ref mut progress_timeline,
+                } => match result {
+                    Ok(handle) => {
+                        *progress_timeline = anim::Options::new(progress_timeline.value(), 0.8)
+                            .duration(Duration::from_millis(2000))
+                            .easing(
+                                anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut),
+                            )
+                            .begin_animation();
+                        Task::perform(
+                            server_backend.download_template_previews(handle),
+                            |result| {
+                                MainAppMessage::<S>::PreviewDownloaded(
+                                    result.map_err(|err| err.to_string()),
+                                )
+                            },
+                        )
+                    }
+                    Err(err) => {
+                        panic!("something went wrong: {}", err)
+                    }
+                },
+                _ => Task::none(),
+            },
+            MainAppMessage::PreviewDownloaded(result) => match self.state {
+                MainAppState::Uploading {
+                    ref mut progress_timeline,
                 } => {
                     match result {
-                        Ok(_handle) => {
+                        Ok(handle) => {
+                            self.previews = handle
+                                .into_iter()
+                                .map(|img| {
+                                    iced::widget::image::Handle::from_rgba(
+                                        img.width(),
+                                        img.height(),
+                                        img.into_raw(),
+                                    )
+                                })
+                                .collect();
                             *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
-                                .duration(Duration::from_millis(500))
+                                .duration(Duration::from_millis(1000))
                                 .easing(
                                     anim::easing::cubic_ease()
                                         .mode(anim::easing::EasingMode::InOut),
@@ -327,10 +366,15 @@ impl<
                     ]))
                     .into()
                 }
-                MainAppState::EditPrintUpsellBanner { animation_timeline } => title_overlay(
-                    title_text("Edit and download your photo at the nearby kiosk"),
-                )
-                .into(),
+                MainAppState::EditPrintUpsellBanner { animation_timeline } => {
+                    title_overlay(column([
+                        container(iced::widget::image(&self.previews[0]))
+                            .center(Length::Fill)
+                            .into(),
+                        title_text("Edit and download your photo at the nearby kiosk").into(),
+                    ]))
+                    .into()
+                }
             },
         ])
         .into()

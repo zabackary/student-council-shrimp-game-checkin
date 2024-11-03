@@ -30,6 +30,7 @@ reqwest = { version = "0.12.9", features = [
 gcp_auth = "0.12.3"
 chrono = "0.4.38"
 dotenv_codegen = "0.15.0"
+bytes = "1.8.0"
 
 
 # The following lines from https://bevyengine.org/learn/quick-start/getting-started/setup/

@@ -43,48 +43,6 @@ impl Display for SupabaseBackendError {
     }
 }
 
-async fn upload_file(
-    content: &[u8],
-    content_mime: &str,
-    name: &str,
-    folder: &str,
-    token: &str,
-    client: &reqwest::Client,
-) -> reqwest::Result<PartialFileMetadata> {
-    let mut metadata_headers = HeaderMap::with_capacity(1);
-    metadata_headers.append(
-        "Content-Type",
-        HeaderValue::from_static("application/json;charset=UTF-8"),
-    );
-    let mut content_headers = HeaderMap::with_capacity(1);
-    content_headers.append(
-        "Content-Type",
-        HeaderValue::from_str(&content_mime).expect("bad mime"),
-    );
-    let form = reqwest::multipart::Form::new()
-        .part("", Part::text(json!({
-            "parents": [folder],
-            "name": name,
-            "description": format!("Uploaded at {} by photo-booth-v2", chrono::offset::Local::now())
-        }).to_string()).headers(metadata_headers))
-        // yay, big allocation
-        .part("", Part::bytes(content.to_owned()).headers(content_headers));
-    client
-        .post("https://www.googleapis.com/upload/drive/v3/files")
-        .query(&[("uploadType", "multipart")])
-        .multipart(form)
-        .header(
-            "Content-Type",
-            HeaderValue::from_static("multipart/related"),
-        )
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-}
-
 impl super::ServerBackend for SupabaseBackend {
     type Error = SupabaseBackendError;
     type UploadHandle = String;
@@ -136,38 +94,48 @@ impl super::ServerBackend for SupabaseBackend {
     }
 
     async fn download_template_previews(
-        &self,
+        self,
         handle: Self::UploadHandle,
     ) -> Result<Vec<RgbaImage>, Self::Error> {
-        let mut images = Vec::new();
-        for template in &self.config.templates {
-            images.push(
-                image::load_from_memory(
-                    &self
-                        .client
-                        .get(format!(
-                            "{}/functions/v1/{}",
-                            dotenv!("SUPABASE_ENDPOINT"),
-                            RENDER_TAKE_ENDPOINT
-                        ))
-                        .query(&[
-                            ("takeId", handle.clone()),
-                            ("templateId", template.id.clone()),
-                        ])
-                        .send()
-                        .await
-                        .map_err(SupabaseBackendError::Reqwest)?
-                        .error_for_status()
-                        .map_err(SupabaseBackendError::Reqwest)?
-                        .bytes()
-                        .await
-                        .map_err(SupabaseBackendError::Reqwest)?,
-                )
-                .map_err(SupabaseBackendError::ImageEncodeDecode)?
-                .to_rgba8(),
-            );
+        let join_handles: Vec<_> = self
+            .config
+            .templates
+            .into_iter()
+            .map(|template| {
+                let request = self
+                    .client
+                    .get(format!(
+                        "{}/functions/v1/{}",
+                        dotenv!("SUPABASE_ENDPOINT"),
+                        RENDER_TAKE_ENDPOINT
+                    ))
+                    .query(&[
+                        ("takeId", handle.clone()),
+                        ("templateId", template.id.clone()),
+                    ]);
+                tokio::spawn(async move {
+                    let img = image::load_from_memory(
+                        &request
+                            .send()
+                            .await
+                            .map_err(SupabaseBackendError::Reqwest)?
+                            .error_for_status()
+                            .map_err(SupabaseBackendError::Reqwest)?
+                            .bytes()
+                            .await
+                            .map_err(SupabaseBackendError::Reqwest)?,
+                    )
+                    .map_err(SupabaseBackendError::ImageEncodeDecode)?
+                    .to_rgba8();
+                    Result::<RgbaImage, SupabaseBackendError>::Ok(img)
+                })
+            })
+            .collect();
+        let mut results = Vec::with_capacity(join_handles.len());
+        for join_handle in join_handles {
+            results.push(join_handle.await.expect("future terminated unexpectedly")?);
         }
-        Ok(images)
+        Ok(results)
     }
 
     async fn upload_photos(
@@ -184,24 +152,62 @@ impl super::ServerBackend for SupabaseBackend {
             .await
             .map_err(SupabaseBackendError::GcpAuth)?;
         let now = chrono::offset::Local::now().to_string();
-        let mut urls = Vec::new();
-        for (i, photo) in photos.iter().enumerate() {
-            let mut encoded = Vec::new();
-            let mut encoded_cursor = Cursor::new(&mut encoded);
-            photo
-                .write_to(&mut encoded_cursor, image::ImageFormat::WebP)
-                .map_err(SupabaseBackendError::ImageEncodeDecode)?;
-            let file = upload_file(
-                &encoded,
-                "image/webp",
-                &format!("{now}-frame{i}"),
-                dotenv!("DRIVE_FOLDER_ID"),
-                token.as_str(),
-                &self.client,
-            )
-            .await
-            .map_err(SupabaseBackendError::Reqwest)?;
-            urls.push(format!("https://drive.google.com/uc?id={}", file.id));
+        let join_handles: Vec<_> = photos
+            .into_iter()
+            .enumerate()
+            .map(|(i, photo)| {
+                let now = now.clone();
+                let token = token.clone();
+
+                let mut encoded = Vec::new();
+                let mut encoded_cursor = Cursor::new(&mut encoded);
+                photo
+                    .write_to(&mut encoded_cursor, image::ImageFormat::Png)
+                    .map_err(SupabaseBackendError::ImageEncodeDecode)
+                    .expect("could not encode image");
+
+                let name = format!("{now}-frame{i}");
+                let mut metadata_headers = HeaderMap::with_capacity(1);
+                metadata_headers.append(
+                    "Content-Type",
+                    HeaderValue::from_static("application/json;charset=UTF-8"),
+                );
+                let mut content_headers = HeaderMap::with_capacity(1);
+                content_headers.append("Content-Type", HeaderValue::from_static("image/webp"));
+                let form = reqwest::multipart::Form::new()
+                    .part("", Part::text(json!({
+                        "parents": [dotenv!("DRIVE_FOLDER_ID")],
+                        "name": name,
+                        "description": format!("Uploaded at {} by photo-booth-v2", chrono::offset::Local::now())
+                    }).to_string()).headers(metadata_headers))
+                    .part("", Part::bytes(encoded).headers(content_headers));
+                let request = self
+                    .client
+                    .post("https://www.googleapis.com/upload/drive/v3/files")
+                    .query(&[("uploadType", "multipart")])
+                    .multipart(form)
+                    .header(
+                        "Content-Type",
+                        HeaderValue::from_static("multipart/related"),
+                    )
+                    .header("Authorization", format!("Bearer {}", token.as_str()));
+                tokio::spawn(async move {
+                    let file: PartialFileMetadata = request
+                        .send()
+                        .await
+                        .map_err(SupabaseBackendError::Reqwest)?
+                        .error_for_status()
+                        .map_err(SupabaseBackendError::Reqwest)?
+                        .json()
+                        .await
+                        .map_err(SupabaseBackendError::Reqwest)?;
+                    Ok(format!("https://drive.google.com/uc?id={}", file.id))
+                })
+            })
+            .collect();
+        let mut urls = Vec::with_capacity(join_handles.len());
+        for join_handle in join_handles {
+            urls.push(join_handle.await.expect("future terminated unexpectedly")?);
         }
         #[derive(Debug, serde::Serialize, serde::Deserialize)]
         struct Id {

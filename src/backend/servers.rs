@@ -33,7 +33,7 @@ pub trait ServerBackend: Clone + Send {
     fn config(&self) -> &ServerConfig;
 
     fn download_template_previews(
-        &self,
+        self,
         handle: Self::UploadHandle,
     ) -> impl std::future::Future<Output = Result<Vec<RgbaImage>, Self::Error>> + Send;
 
