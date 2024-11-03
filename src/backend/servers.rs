@@ -5,6 +5,12 @@ use image::RgbaImage;
 pub mod supabase;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ServerTemplate {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ServerConfig {
     id: String,
     name: String,
@@ -13,6 +19,7 @@ pub struct ServerConfig {
     contact_name: String,
     contact_email: String,
     paid_is_unlocked: Option<bool>,
+    templates: Vec<ServerTemplate>,
 }
 
 pub trait ServerBackend: Clone + Send {

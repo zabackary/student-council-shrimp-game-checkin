@@ -29,7 +29,7 @@ pub enum SupabaseBackendError {
     Reqwest(reqwest::Error),
     JsonDecode(reqwest::Error),
     GcpAuth(gcp_auth::Error),
-    Encode(image::ImageError),
+    ImageEncodeDecode(image::ImageError),
 }
 
 impl Display for SupabaseBackendError {
@@ -38,7 +38,7 @@ impl Display for SupabaseBackendError {
             Self::Reqwest(err) => write!(f, "reqwest error: {}", err),
             Self::JsonDecode(err) => write!(f, "json decode error: {}", err),
             Self::GcpAuth(err) => write!(f, "service account authorization error: {}", err),
-            Self::Encode(err) => write!(f, "image encode error: {}", err),
+            Self::ImageEncodeDecode(err) => write!(f, "image encode/decode error: {}", err),
         }
     }
 }
@@ -139,7 +139,35 @@ impl super::ServerBackend for SupabaseBackend {
         &self,
         handle: Self::UploadHandle,
     ) -> Result<Vec<RgbaImage>, Self::Error> {
-        todo!()
+        let mut images = Vec::new();
+        for template in &self.config.templates {
+            images.push(
+                image::load_from_memory(
+                    &self
+                        .client
+                        .get(format!(
+                            "{}/functions/v1/{}",
+                            dotenv!("SUPABASE_ENDPOINT"),
+                            RENDER_TAKE_ENDPOINT
+                        ))
+                        .query(&[
+                            ("takeId", handle.clone()),
+                            ("templateId", template.id.clone()),
+                        ])
+                        .send()
+                        .await
+                        .map_err(SupabaseBackendError::Reqwest)?
+                        .error_for_status()
+                        .map_err(SupabaseBackendError::Reqwest)?
+                        .bytes()
+                        .await
+                        .map_err(SupabaseBackendError::Reqwest)?,
+                )
+                .map_err(SupabaseBackendError::ImageEncodeDecode)?
+                .to_rgba8(),
+            );
+        }
+        Ok(images)
     }
 
     async fn upload_photos(
@@ -162,7 +190,7 @@ impl super::ServerBackend for SupabaseBackend {
             let mut encoded_cursor = Cursor::new(&mut encoded);
             photo
                 .write_to(&mut encoded_cursor, image::ImageFormat::WebP)
-                .map_err(SupabaseBackendError::Encode)?;
+                .map_err(SupabaseBackendError::ImageEncodeDecode)?;
             let file = upload_file(
                 &encoded,
                 "image/webp",
