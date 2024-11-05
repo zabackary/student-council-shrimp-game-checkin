@@ -51,7 +51,12 @@ impl<
                     task.map(MainAppMessage::Camera)
                         .map(PhotoBoothMessage::MainApp),
                 )));
-                Task::none()
+                iced::window::get_latest().then(|id| {
+                    iced::Task::batch([
+                        iced::window::change_mode(id.unwrap(), iced::window::Mode::Fullscreen),
+                        iced::window::toggle_decorations(id.unwrap()),
+                    ])
+                })
             }
         }
     }
