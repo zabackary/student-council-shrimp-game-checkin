@@ -193,5 +193,10 @@ fn image_postprocessing(
         // frame = image::imageops::blur(&frame, options.blur);
         // but the performance hit is too high for this kind of application
     }
-    frame
+    image::imageops::resize(
+        &frame,
+        ((frame.width() as f64) / 1.4) as u32,
+        ((frame.height() as f64) / 1.4) as u32,
+        image::imageops::FilterType::Triangle,
+    )
 }
