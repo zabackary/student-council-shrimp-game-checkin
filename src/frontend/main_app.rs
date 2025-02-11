@@ -18,6 +18,7 @@ use super::{
 mod animations;
 
 const PHOTO_ASPECT_RATIO: f32 = 3.0 / 2.0;
+const PHOTO_COUNT: usize = 4;
 
 enum CapturePhotosState {
     Countdown {
@@ -87,8 +88,8 @@ impl<
             feed,
             state: MainAppState::PaymentRequired { show_error: false },
             new_page: None,
-            captured_photos: Vec::with_capacity(4),
-            previews: Vec::with_capacity(4),
+            captured_photos: Vec::with_capacity(PHOTO_COUNT),
+            previews: Vec::with_capacity(PHOTO_COUNT),
         }
     }
 
@@ -201,7 +202,7 @@ impl<
                     } => {
                         if preview_timeline.update().is_completed() {
                             *current += 1;
-                            if *current <= 3 {
+                            if *current < PHOTO_COUNT {
                                 *state = CapturePhotosState::Countdown {
                                     current: 3,
                                     countdown_timeline: animations::countdown_circle::animation()
