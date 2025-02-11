@@ -57,7 +57,7 @@ pub fn view<Message: 'static>(
                 text_color: Some(
                     theme
                         .extended_palette()
-                        .background
+                        .primary
                         .strong
                         .text
                         .scale_alpha(animation_state.opacity),
@@ -65,7 +65,7 @@ pub fn view<Message: 'static>(
                 background: Some(
                     theme
                         .extended_palette()
-                        .background
+                        .primary
                         .strong
                         .color
                         .scale_alpha(animation_state.opacity)

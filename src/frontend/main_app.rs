@@ -1,4 +1,4 @@
-use std::{io::Read, time::Duration};
+use std::time::Duration;
 
 use anim::Animation;
 use iced::{
@@ -294,7 +294,7 @@ impl<
                 MainAppState::Uploading {
                     ref mut progress_timeline,
                 } => match result {
-                    Ok(handle) => {
+                    Ok(_) => {
                         *progress_timeline = anim::Options::new(progress_timeline.value(), 0.8)
                             .duration(Duration::from_millis(2000))
                             .easing(
@@ -408,7 +408,7 @@ impl<
         }
     }
 
-    pub fn view<'a>(&'a self, server_backend: &'a S) -> Element<'a, MainAppMessage<S>> {
+    pub fn view<'a>(&'a self, _server_backend: &'a S) -> Element<'a, MainAppMessage<S>> {
         iced::widget::stack([
             self.feed
                 .view()
@@ -506,8 +506,7 @@ impl<
                     column([
                         title_text("Entering the games requires creating visual identification.")
                             .into(),
-                        supporting_text("Press space when you're ready to take your team photo.")
-                            .into(),
+                        supporting_text("Press space to create your official photograph.").into(),
                         vertical_space().height(12.0).into(),
                     ]),
                     true,

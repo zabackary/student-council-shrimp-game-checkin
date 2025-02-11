@@ -1,6 +1,6 @@
 use iced::{
-    widget::{container, horizontal_space, row, text, Row, Text},
-    Alignment, Border, Element, Font, Length,
+    widget::{container, horizontal_space, row, text},
+    Alignment, Border, Color, Element, Font, Length,
 };
 
 pub fn team_row<'a, Message: 'a>(
@@ -25,19 +25,19 @@ pub fn team_row<'a, Message: 'a>(
     )
     .style(move |theme: &iced::Theme| container::Style {
         background: Some(
-            theme
-                .extended_palette()
-                .background
-                .strong
-                .color
-                .scale_alpha(if highlight {
-                    0.8
-                } else if checked_in {
-                    0.0
-                } else {
-                    0.2
-                })
-                .into(),
+            if highlight {
+                theme.extended_palette().primary.base.color.scale_alpha(0.3)
+            } else if checked_in {
+                Color::TRANSPARENT
+            } else {
+                theme
+                    .extended_palette()
+                    .background
+                    .strong
+                    .color
+                    .scale_alpha(0.2)
+            }
+            .into(),
         ),
         border: if highlight {
             Border {

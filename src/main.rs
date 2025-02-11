@@ -8,7 +8,7 @@ use frontend::{
     main_app::{MainApp, MainAppMessage},
     setup::{Setup, SetupMessage},
 };
-use iced::{keyboard::Key, Font, Task};
+use iced::{keyboard::Key, theme::Palette, Font, Task};
 
 mod backend;
 mod frontend;
@@ -179,7 +179,18 @@ fn main() -> iced::Result {
         "../assets/fonts/Poor_Story/PoorStory-Regular.ttf"
     ))
     .default_font(Font::with_name("Poor Story"))
-    .theme(|_| iced::Theme::Oxocarbon)
+    .theme(|_| {
+        iced::Theme::custom(
+            "Shrimp Game".to_owned(),
+            Palette {
+                background: iced::Color::from_rgb8(0x4e, 0x2a, 0x25),
+                text: iced::Color::from_rgb8(0xff, 0xff, 0xff),
+                primary: iced::Color::from_rgb8(0xf8, 0x46, 0xaa),
+                success: iced::Color::from_rgb8(0x00, 0xff, 0x00),
+                danger: iced::Color::from_rgb8(0xff, 0x00, 0x00),
+            },
+        )
+    })
     .subscription(PhotoBoothApplication::subscription)
     .run_with(|| {
         let server_backend = ServerBackend::new().expect("failed to initialize server backend");

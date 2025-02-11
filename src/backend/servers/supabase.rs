@@ -25,7 +25,6 @@ pub struct SupabaseBackend {
 #[derive(Debug)]
 pub enum SupabaseBackendError {
     Reqwest(reqwest::Error),
-    JsonDecode(reqwest::Error),
     GcpAuth(gcp_auth::Error),
     ImageEncodeDecode(image::ImageError),
 }
@@ -34,7 +33,6 @@ impl Display for SupabaseBackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Reqwest(err) => write!(f, "reqwest error: {}", err),
-            Self::JsonDecode(err) => write!(f, "json decode error: {}", err),
             Self::GcpAuth(err) => write!(f, "service account authorization error: {}", err),
             Self::ImageEncodeDecode(err) => write!(f, "image encode/decode error: {}", err),
         }
