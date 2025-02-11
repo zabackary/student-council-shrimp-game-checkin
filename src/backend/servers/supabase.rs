@@ -9,8 +9,8 @@ use reqwest::{
 };
 use serde_json::json;
 
-const TEAMS_ENDPOINT: &str = "instance-data";
-const UPLOAD_TEAM_MUG: &str = "insert-take";
+const TEAMS_ENDPOINT: &str = "team-data";
+const UPLOAD_TEAM_MUG: &str = "update-team-mug";
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PartialFileMetadata {
@@ -43,7 +43,7 @@ impl Display for SupabaseBackendError {
 
 impl super::ServerBackend for SupabaseBackend {
     type Error = SupabaseBackendError;
-    type UploadHandle = String;
+    type UploadHandle = ();
 
     fn new() -> Result<Self, Self::Error> {
         let client = reqwest::ClientBuilder::new()
@@ -72,11 +72,7 @@ impl super::ServerBackend for SupabaseBackend {
         Ok(response)
     }
 
-    async fn upload_photo(
-        self,
-        photo: RgbaImage,
-        team_id: i64,
-    ) -> Result<Self::UploadHandle, Self::Error> {
+    async fn upload_photo(self, photo: RgbaImage, team_id: i64) -> Result<(), Self::Error> {
         let service_account = gcp_auth::CustomServiceAccount::from_json(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/service_account_key.json"
@@ -131,26 +127,18 @@ impl super::ServerBackend for SupabaseBackend {
             .map_err(SupabaseBackendError::Reqwest)?;
         let url = format!("https://drive.google.com/uc?id={}", file.id);
 
-        #[derive(Debug, serde::Serialize, serde::Deserialize)]
-        struct Id {
-            id: String,
-        }
-        let id: Id = self
-            .client
+        self.client
             .post(format!(
                 "{}/functions/v1/{}",
                 dotenv!("SUPABASE_ENDPOINT"),
                 UPLOAD_TEAM_MUG
             ))
-            .query(&[("url", url), ("teamId", team_id.to_string())])
+            .query(&[("mugUrl", url), ("id", team_id.to_string())])
             .send()
             .await
             .map_err(SupabaseBackendError::Reqwest)?
             .error_for_status()
-            .map_err(SupabaseBackendError::Reqwest)?
-            .json()
-            .await
             .map_err(SupabaseBackendError::Reqwest)?;
-        Ok(id.id)
+        Ok(())
     }
 }

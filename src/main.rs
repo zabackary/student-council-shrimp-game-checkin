@@ -38,6 +38,16 @@ enum PhotoBoothMessage<
     MainApp(MainAppMessage<S>),
     Tick,
     SpaceReleased,
+    EscapeReleased,
+    UpReleased,
+    DownReleased,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KeyMessage {
+    Space,
+    Up,
+    Down,
 }
 
 impl<
@@ -81,12 +91,37 @@ impl<
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
-            PhotoBoothMessage::SpaceReleased => match &mut self.page {
+            PhotoBoothMessage::SpaceReleased
+            | PhotoBoothMessage::DownReleased
+            | PhotoBoothMessage::UpReleased => match &mut self.page {
                 AppPage::MainApp(page) => page
-                    .update(MainAppMessage::SpaceReleased, self.server_backend.clone())
+                    .update(
+                        MainAppMessage::KeyReleased(match message {
+                            PhotoBoothMessage::SpaceReleased => KeyMessage::Space,
+                            PhotoBoothMessage::DownReleased => KeyMessage::Down,
+                            PhotoBoothMessage::UpReleased => KeyMessage::Up,
+                            _ => unreachable!(),
+                        }),
+                        self.server_backend.clone(),
+                    )
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
+            PhotoBoothMessage::EscapeReleased => iced::window::get_latest().then(|id| {
+                iced::Task::batch([
+                    iced::window::get_mode(id.unwrap()).then(move |mode| {
+                        iced::window::change_mode(
+                            id.unwrap(),
+                            match mode {
+                                iced::window::Mode::Fullscreen => iced::window::Mode::Windowed,
+                                iced::window::Mode::Windowed => iced::window::Mode::Fullscreen,
+                                iced::window::Mode::Hidden => iced::window::Mode::Windowed,
+                            },
+                        )
+                    }),
+                    iced::window::toggle_decorations(id.unwrap()),
+                ])
+            }),
         }
     }
 
@@ -104,9 +139,21 @@ impl<
         iced::Subscription::batch([
             iced::time::every(Duration::from_secs_f32(1.0 / FPS))
                 .map(|_tick| PhotoBoothMessage::Tick),
-            iced::keyboard::on_key_release(|key, _modifiers| match key {
-                Key::Named(iced::keyboard::key::Named::Space) => {
+            iced::keyboard::on_key_press(|key, _modifiers| match key {
+                Key::Named(iced::keyboard::key::Named::Space)
+                | Key::Named(iced::keyboard::key::Named::Enter) => {
                     Some(PhotoBoothMessage::SpaceReleased)
+                }
+                Key::Named(iced::keyboard::key::Named::Escape) => {
+                    Some(PhotoBoothMessage::EscapeReleased)
+                }
+                Key::Named(iced::keyboard::key::Named::PageUp)
+                | Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                    Some(PhotoBoothMessage::UpReleased)
+                }
+                Key::Named(iced::keyboard::key::Named::PageDown)
+                | Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                    Some(PhotoBoothMessage::DownReleased)
                 }
                 _ => None,
             }),
@@ -125,9 +172,15 @@ fn main() -> iced::Result {
         PhotoBoothApplication::update,
         PhotoBoothApplication::view,
     )
+    .font(include_bytes!(
+        "../assets/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf"
+    ))
+    .font(include_bytes!(
+        "../assets/fonts/Poor_Story/PoorStory-Regular.ttf"
+    ))
+    .default_font(Font::with_name("Poor Story"))
     .theme(|_| iced::Theme::Oxocarbon)
     .subscription(PhotoBoothApplication::subscription)
-    .default_font(Font::with_name("Noto Sans JP"))
     .run_with(|| {
         let server_backend = ServerBackend::new().expect("failed to initialize server backend");
         (

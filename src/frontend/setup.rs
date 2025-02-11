@@ -46,10 +46,14 @@ impl<
                     C::open_camera(self.camera_option.clone().unwrap()).unwrap(),
                     Default::default(),
                 );
+                let (app, app_task) = MainApp::new(feed);
                 self.new_page = Some(Box::new((
-                    AppPage::MainApp(MainApp::new(feed)),
-                    task.map(MainAppMessage::Camera)
-                        .map(PhotoBoothMessage::MainApp),
+                    AppPage::MainApp(app),
+                    Task::batch([
+                        task.map(MainAppMessage::Camera)
+                            .map(PhotoBoothMessage::MainApp),
+                        app_task.map(PhotoBoothMessage::MainApp),
+                    ]),
                 )));
                 iced::window::get_latest().then(|id| {
                     iced::Task::batch([

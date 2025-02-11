@@ -5,10 +5,18 @@ use image::RgbaImage;
 pub mod supabase;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Person {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Team {
     pub id: i64,
     pub name: String,
     pub signup_email_address: String,
+    pub mug_url: Option<String>,
+    pub people: Vec<Person>,
 }
 
 pub trait ServerBackend: Clone + Send {

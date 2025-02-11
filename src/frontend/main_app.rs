@@ -1,24 +1,31 @@
-use std::time::Duration;
+use std::{io::Read, time::Duration};
 
 use anim::Animation;
 use iced::{
-    widget::{column, container, image::Handle, progress_bar, row, vertical_space, Space},
+    widget::{
+        column, container,
+        image::Handle,
+        progress_bar, scrollable,
+        scrollable::{AbsoluteOffset, Id},
+        vertical_space, Space,
+    },
     Alignment, ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
 
-use crate::{AppPage, PhotoBoothMessage};
+use crate::{backend::servers::Team, AppPage, KeyMessage, PhotoBoothMessage};
 
 use super::{
     camera_feed::{CameraFeed, CameraFeedOptions},
     loading_spinners,
+    team_row::team_row,
     title_overlay::{supporting_text, title_overlay, title_text},
 };
 
 mod animations;
 
 const PHOTO_ASPECT_RATIO: f32 = 3.0 / 2.0;
-const PHOTO_COUNT: usize = 4;
+const PHOTO_COUNT: usize = 1;
 
 enum CapturePhotosState {
     Countdown {
@@ -60,11 +67,12 @@ enum MainAppState {
 pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     Camera(super::camera_feed::CameraMessage),
     Tick,
-    SpaceReleased,
+    KeyReleased(KeyMessage),
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
-    PreviewDownloaded(Result<Vec<RgbaImage>, String>),
+    UpdatedTeams(Result<Vec<Team>, String>),
     IsUnlockedResponse(Result<Option<bool>, String>),
+    TeamsResponse(Result<Vec<Team>, String>),
 }
 
 pub struct MainApp<
@@ -75,6 +83,8 @@ pub struct MainApp<
     state: MainAppState,
     captured_photos: Vec<RgbaImage>,
     previews: Vec<iced::widget::image::Handle>,
+    teams: Vec<Team>,
+    team_index: usize,
     pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
@@ -83,14 +93,22 @@ impl<
         S: crate::backend::servers::ServerBackend + 'static,
     > MainApp<C, S>
 {
-    pub fn new(feed: CameraFeed<C::Camera>) -> Self {
-        Self {
-            feed,
-            state: MainAppState::PaymentRequired { show_error: false },
-            new_page: None,
-            captured_photos: Vec::with_capacity(PHOTO_COUNT),
-            previews: Vec::with_capacity(PHOTO_COUNT),
-        }
+    pub fn new(feed: CameraFeed<C::Camera>) -> (Self, Task<MainAppMessage<S>>) {
+        (
+            Self {
+                feed,
+                state: MainAppState::PaymentRequired { show_error: false },
+                new_page: None,
+                captured_photos: Vec::with_capacity(PHOTO_COUNT),
+                previews: Vec::with_capacity(PHOTO_COUNT),
+                teams: Vec::new(),
+                team_index: 0,
+            },
+            Task::perform(
+                S::new().expect("failed to create backend").teams(),
+                |result| MainAppMessage::TeamsResponse(result.map_err(|x| x.to_string())),
+            ),
+        )
     }
 
     pub fn update(
@@ -220,8 +238,16 @@ impl<
                                         .begin_animation(),
                                 };
                                 let old = self.captured_photos.drain(..).collect::<Vec<_>>();
-                                let future = server_backend
-                                    .upload_photo(old.into_iter().next().unwrap(), -1); // TODO: get team number
+                                self.previews.clear();
+                                self.previews.push(iced::widget::image::Handle::from_rgba(
+                                    old[0].width(),
+                                    old[0].height(),
+                                    old[0].as_raw().clone(),
+                                ));
+                                let future = server_backend.upload_photo(
+                                    old.into_iter().next().unwrap(),
+                                    self.teams[self.team_index].id,
+                                );
                                 Task::perform(future, |result| {
                                     MainAppMessage::Uploaded(result.map_err(|x| x.to_string()))
                                 })
@@ -236,7 +262,7 @@ impl<
                     {
                         self.state = MainAppState::EditPrintUpsellBanner {
                             progress_timeline: anim::Options::new(0.0, 1.0)
-                                .duration(Duration::from_millis(20000))
+                                .duration(Duration::from_millis(4000))
                                 .easing(anim::easing::linear())
                                 .begin_animation(),
                             template_preview_timeline: animations::upsell_templates::animation()
@@ -257,6 +283,7 @@ impl<
                             animations::upsell_templates::animation().begin_animation()
                     }
                     if progress_timeline.update().is_completed() {
+                        self.team_index = 0;
                         self.state = MainAppState::PaymentRequired { show_error: false };
                     }
                     Task::none()
@@ -274,9 +301,9 @@ impl<
                                 anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut),
                             )
                             .begin_animation();
-                        Task::done(MainAppMessage::<S>::PreviewDownloaded(
-                            Ok(Vec::new()), // FIXME: implement this
-                        ))
+                        Task::perform(server_backend.teams(), |result| {
+                            MainAppMessage::<S>::UpdatedTeams(result.map_err(|x| x.to_string()))
+                        })
                     }
                     Err(err) => {
                         panic!("something went wrong: {}", err)
@@ -284,22 +311,13 @@ impl<
                 },
                 _ => Task::none(),
             },
-            MainAppMessage::PreviewDownloaded(result) => match self.state {
+            MainAppMessage::UpdatedTeams(result) => match self.state {
                 MainAppState::Uploading {
                     ref mut progress_timeline,
                 } => {
                     match result {
-                        Ok(handle) => {
-                            self.previews = handle
-                                .into_iter()
-                                .map(|img| {
-                                    iced::widget::image::Handle::from_rgba(
-                                        img.width(),
-                                        img.height(),
-                                        img.into_raw(),
-                                    )
-                                })
-                                .collect();
+                        Ok(teams) => {
+                            self.teams = teams;
                             *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
                                 .duration(Duration::from_millis(1000))
                                 .easing(
@@ -334,10 +352,33 @@ impl<
                 },
                 _ => Task::none(),
             },
-            MainAppMessage::SpaceReleased => match &mut self.state {
-                MainAppState::PaymentRequired { .. } => {
-                    Task::done(MainAppMessage::IsUnlockedResponse(Ok(Some(true))))
-                }
+            MainAppMessage::KeyReleased(key) => match &mut self.state {
+                MainAppState::PaymentRequired { .. } => match key {
+                    KeyMessage::Up => {
+                        self.team_index =
+                            (self.team_index + self.teams.len() - 1) % self.teams.len();
+                        scrollable::scroll_to(
+                            Id::new("team_scrollable"),
+                            AbsoluteOffset {
+                                y: (64.0 + 8.0) * self.team_index as f32 - 80.0,
+                                x: 0.0,
+                            },
+                        )
+                    }
+                    KeyMessage::Down => {
+                        self.team_index = (self.team_index + 1) % self.teams.len();
+                        scrollable::scroll_to(
+                            Id::new("team_scrollable"),
+                            AbsoluteOffset {
+                                y: (64.0 + 8.0) * self.team_index as f32 - 80.0,
+                                x: 0.0,
+                            },
+                        )
+                    }
+                    KeyMessage::Space => {
+                        Task::done(MainAppMessage::IsUnlockedResponse(Ok(Some(true))))
+                    }
+                },
                 MainAppState::Preview => {
                     self.state = MainAppState::CapturePhotosPrepare {
                         ready_timeline: animations::ready::animation().begin_animation(),
@@ -354,6 +395,15 @@ impl<
                     Task::none()
                 }
                 _ => Task::none(),
+            },
+            MainAppMessage::TeamsResponse(result) => match result {
+                Ok(teams) => {
+                    self.teams = teams;
+                    Task::none()
+                }
+                Err(err) => {
+                    panic!("failed to get teams: {}", err);
+                }
             },
         }
     }
@@ -389,6 +439,18 @@ impl<
                                     })
                                     .into(),
                                 vertical_space().height(6).into(),
+                                scrollable(
+                                    column(self.teams.iter().enumerate().map(|(i, team)| {
+                                        team_row(
+                                            &team.name,
+                                            i == self.team_index,
+                                            matches!(team.mug_url, Some(_)),
+                                        )
+                                    }))
+                                    .spacing(8),
+                                )
+                                .id(Id::new("team_scrollable"))
+                                .into(),
                                 vertical_space().height(12).into(),
                                 if *show_error {
                                     column([
@@ -442,8 +504,10 @@ impl<
                 .into(),
                 MainAppState::Preview => title_overlay(
                     column([
-                        title_text("Press the space key to start taking pictures!").into(),
-                        supporting_text("スペースキーを押すと、撮影が開始されます。").into(),
+                        title_text("Entering the games requires creating visual identification.")
+                            .into(),
+                        supporting_text("Press space when you're ready to take your team photo.")
+                            .into(),
                         vertical_space().height(12.0).into(),
                     ]),
                     true,
@@ -478,8 +542,8 @@ impl<
                         )
                         .center(Length::Fill)
                         .into(),
-                        title_text("Your photos are being uploaded.").into(),
-                        supporting_text("写真がアップロードされています。").into(),
+                        title_text("We're uploading your team photos now.").into(),
+                        supporting_text("You may proceed shortly.").into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(8.0)
@@ -499,8 +563,10 @@ impl<
                             template_preview_timeline.value(),
                         )
                         .into(),
-                        title_text("Edit and download your photos right outside").into(),
-                        supporting_text("入口にお戻りいただくと写真の編集やダウンロードが可能です")
+                        title_text(&self.teams[self.team_index].name)
+                            .shaping(iced::widget::text::Shaping::Advanced)
+                            .into(),
+                        supporting_text("The team listed above has been confirmed. Proceed.")
                             .into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
