@@ -218,8 +218,9 @@ impl<
                                         )
                                         .begin_animation(),
                                 };
-                                let old = self.captured_photos.drain(..).collect();
-                                let future = server_backend.upload_photos(old);
+                                let old = self.captured_photos.drain(..).collect::<Vec<_>>();
+                                let future = server_backend
+                                    .upload_photo(old.into_iter().next().unwrap(), -1); // TODO: get team number
                                 Task::perform(future, |result| {
                                     MainAppMessage::Uploaded(result.map_err(|x| x.to_string()))
                                 })
@@ -272,14 +273,9 @@ impl<
                                 anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut),
                             )
                             .begin_animation();
-                        Task::perform(
-                            server_backend.download_template_previews(handle),
-                            |result| {
-                                MainAppMessage::<S>::PreviewDownloaded(
-                                    result.map_err(|err| err.to_string()),
-                                )
-                            },
-                        )
+                        Task::done(MainAppMessage::<S>::PreviewDownloaded(
+                            Ok(Vec::new()), // FIXME: implement this
+                        ))
                     }
                     Err(err) => {
                         panic!("something went wrong: {}", err)
@@ -339,9 +335,7 @@ impl<
             },
             MainAppMessage::SpaceReleased => match &mut self.state {
                 MainAppState::PaymentRequired { .. } => {
-                    Task::perform(server_backend.is_unlocked(), |result| {
-                        MainAppMessage::IsUnlockedResponse(result.map_err(|err| err.to_string()))
-                    })
+                    Task::done(MainAppMessage::IsUnlockedResponse(Ok(Some(true))))
                 }
                 MainAppState::Preview => {
                     self.state = MainAppState::CapturePhotosPrepare {
@@ -387,65 +381,28 @@ impl<
                     container(
                         container(
                             column([
-                                iced::widget::text("Photo booth")
+                                iced::widget::text("Shrimp Game Check-in")
                                     .size(42)
                                     .style(|theme: &iced::Theme| iced::widget::text::Style {
                                         color: Some(theme.extended_palette().background.base.text),
                                     })
                                     .into(),
                                 vertical_space().height(6).into(),
-                                iced::widget::text(&server_backend.config().paid_information)
-                                    .size(18)
-                                    .into(),
-                                iced::widget::text(&server_backend.config().paid_information_alt)
-                                    .size(18)
-                                    .into(),
                                 vertical_space().height(12).into(),
-                                container(iced::widget::text("Press space!").size(18))
-                                    .style(|theme: &iced::Theme| container::Style {
-                                        border: iced::Border::default().rounded(f32::MAX),
-                                        background: Some(
-                                            theme.extended_palette().primary.base.color.into(),
-                                        ),
-                                        text_color: Some(
-                                            theme.extended_palette().primary.base.text,
-                                        ),
-                                        ..Default::default()
-                                    })
-                                    .padding(8)
-                                    .into(),
-                                vertical_space().height(12).into(),
-                                container(iced::widget::text("スペースキーを押してください。").size(18))
-                                    .style(|theme: &iced::Theme| container::Style {
-                                        border: iced::Border::default().rounded(f32::MAX),
-                                        background: Some(
-                                            theme.extended_palette().secondary.base.color.into(),
-                                        ),
-                                        text_color: Some(
-                                            theme.extended_palette().secondary.base.text,
-                                        ),
-                                        ..Default::default()
-                                    })
-                                    .padding(8)
-                                    .into(),
                                 if *show_error {
                                     column([
                                         vertical_space().height(12).into(),
-                                        container(
-                                            column([
-                                                iced::widget::text("The booth has not been unlocked. Maybe you haven't payed?").size(12).into(),
-                                                iced::widget::text("ロックされています。チケットを払いましたか。").size(12).into()
-                                            ])
+                                        container(column([iced::widget::text(
+                                            "An error occurred.",
                                         )
+                                        .size(12)
+                                        .into()]))
                                         .style(|theme: &iced::Theme| container::Style {
-                                            border: iced::Border::default().rounded(4.0).color(theme.extended_palette().danger.strong.color),
+                                            border: iced::Border::default().rounded(4.0).color(
+                                                theme.extended_palette().danger.strong.color,
+                                            ),
                                             background: Some(
-                                                theme
-                                                    .extended_palette()
-                                                    .danger
-                                                    .weak
-                                                    .color
-                                                    .into(),
+                                                theme.extended_palette().danger.weak.color.into(),
                                             ),
                                             text_color: Some(
                                                 theme.extended_palette().danger.weak.text,
@@ -459,23 +416,21 @@ impl<
                                 } else {
                                     Space::new(0, 0).into()
                                 },
-                                vertical_space().height(24).into(),
-                                row([
-                                    iced::widget::text(&server_backend.config().name).into(),
-                                    iced::widget::horizontal_space().into(),
-                                    iced::widget::text(&server_backend.config().contact_name)
-                                        .into(),
-                                ])
-                                .into(),
                             ])
                             .align_x(Alignment::Center),
                         )
-                        .max_width(480)
+                        .max_width(780)
                         .padding(18)
                         .style(|theme: &iced::Theme| container::Style {
                             border: iced::Border::default().rounded(28),
                             background: Some(
-                                theme.extended_palette().background.strong.color.into(),
+                                theme
+                                    .extended_palette()
+                                    .background
+                                    .strong
+                                    .color
+                                    .scale_alpha(0.2)
+                                    .into(),
                             ),
                             ..Default::default()
                         }),
@@ -544,10 +499,8 @@ impl<
                         )
                         .into(),
                         title_text("Edit and download your photos right outside").into(),
-                        supporting_text(
-                            "入口にお戻りいただくと写真の編集やダウンロードが可能です",
-                        )
-                        .into(),
+                        supporting_text("入口にお戻りいただくと写真の編集やダウンロードが可能です")
+                            .into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(4.0)

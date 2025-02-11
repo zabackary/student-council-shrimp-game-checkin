@@ -5,21 +5,10 @@ use image::RgbaImage;
 pub mod supabase;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ServerTemplate {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ServerConfig {
-    pub id: String,
+pub struct Team {
+    pub id: i64,
     pub name: String,
-    pub paid_information: String,
-    pub paid_information_alt: String,
-    pub contact_name: String,
-    pub contact_email: String,
-    pub paid_is_unlocked: Option<bool>,
-    pub templates: Vec<ServerTemplate>,
+    pub signup_email_address: String,
 }
 
 pub trait ServerBackend: Clone + Send {
@@ -28,20 +17,12 @@ pub trait ServerBackend: Clone + Send {
 
     fn new() -> Result<Self, Self::Error>;
 
-    fn is_unlocked(
-        self,
-    ) -> impl std::future::Future<Output = Result<Option<bool>, Self::Error>> + Send;
+    fn teams(self) -> impl std::future::Future<Output = Result<Vec<Team>, Self::Error>> + Send;
 
-    fn config(&self) -> &ServerConfig;
-
-    fn download_template_previews(
+    fn upload_photo(
         self,
-        handle: Self::UploadHandle,
-    ) -> impl std::future::Future<Output = Result<Vec<RgbaImage>, Self::Error>> + Send;
-
-    fn upload_photos(
-        self,
-        photos: Vec<RgbaImage>,
+        photo: RgbaImage,
+        team_id: i64,
     ) -> impl std::future::Future<Output = Result<Self::UploadHandle, Self::Error>> + Send;
 }
 

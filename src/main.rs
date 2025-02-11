@@ -121,12 +121,12 @@ fn main() -> iced::Result {
     CameraBackend::initialize().expect("failed to initialize camera backend");
 
     iced::application(
-        "Photo Booth v2",
+        "Shrimp Games Check-in",
         PhotoBoothApplication::update,
         PhotoBoothApplication::view,
     )
+    .theme(|_| iced::Theme::Oxocarbon)
     .subscription(PhotoBoothApplication::subscription)
-    .font(include_bytes!("../assets/NotoSansJP-Regular.ttf"))
     .default_font(Font::with_name("Noto Sans JP"))
     .run_with(|| {
         let server_backend = ServerBackend::new().expect("failed to initialize server backend");
