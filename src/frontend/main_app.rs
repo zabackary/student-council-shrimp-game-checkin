@@ -13,7 +13,7 @@ use iced::{
 };
 use image::RgbaImage;
 
-use crate::{backend::servers::Team, AppPage, KeyMessage, PhotoBoothMessage};
+use crate::{AppPage, KeyMessage, PhotoBoothMessage};
 
 use super::{
     camera_feed::{CameraFeed, CameraFeedOptions},
@@ -25,7 +25,7 @@ use super::{
 mod animations;
 
 const PHOTO_ASPECT_RATIO: f32 = 3.0 / 2.0;
-const PHOTO_COUNT: usize = 1;
+const PHOTO_COUNT: usize = 4;
 
 enum CapturePhotosState {
     Countdown {
@@ -70,9 +70,6 @@ pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     KeyReleased(KeyMessage),
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
-    UpdatedTeams(Result<Vec<Team>, String>),
-    IsUnlockedResponse(Result<Option<bool>, String>),
-    TeamsResponse(Result<Vec<Team>, String>),
 }
 
 pub struct MainApp<
@@ -83,8 +80,6 @@ pub struct MainApp<
     state: MainAppState,
     captured_photos: Vec<RgbaImage>,
     previews: Vec<iced::widget::image::Handle>,
-    teams: Vec<Team>,
-    team_index: usize,
     pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
@@ -101,13 +96,8 @@ impl<
                 new_page: None,
                 captured_photos: Vec::with_capacity(PHOTO_COUNT),
                 previews: Vec::with_capacity(PHOTO_COUNT),
-                teams: Vec::new(),
-                team_index: 0,
             },
-            Task::perform(
-                S::new().expect("failed to create backend").teams(),
-                |result| MainAppMessage::TeamsResponse(result.map_err(|x| x.to_string())),
-            ),
+            Task::none(),
         )
     }
 
@@ -239,15 +229,14 @@ impl<
                                 };
                                 let old = self.captured_photos.drain(..).collect::<Vec<_>>();
                                 self.previews.clear();
-                                self.previews.push(iced::widget::image::Handle::from_rgba(
-                                    old[0].width(),
-                                    old[0].height(),
-                                    old[0].as_raw().clone(),
-                                ));
-                                let future = server_backend.upload_photo(
-                                    old.into_iter().next().unwrap(),
-                                    self.teams[self.team_index].id,
-                                );
+                                for photo in &old {
+                                    self.previews.push(iced::widget::image::Handle::from_rgba(
+                                        photo.width(),
+                                        photo.height(),
+                                        photo.as_raw().clone(),
+                                    ));
+                                }
+                                let future = server_backend.upload_photo(old[0].clone(), old);
                                 Task::perform(future, |result| {
                                     MainAppMessage::Uploaded(result.map_err(|x| x.to_string()))
                                 })
@@ -283,7 +272,6 @@ impl<
                             animations::upsell_templates::animation().begin_animation()
                     }
                     if progress_timeline.update().is_completed() {
-                        self.team_index = 0;
                         self.state = MainAppState::PaymentRequired { show_error: false };
                     }
                     Task::none()
@@ -295,15 +283,13 @@ impl<
                     ref mut progress_timeline,
                 } => match result {
                     Ok(_) => {
-                        *progress_timeline = anim::Options::new(progress_timeline.value(), 0.8)
+                        *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
                             .duration(Duration::from_millis(2000))
                             .easing(
                                 anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut),
                             )
                             .begin_animation();
-                        Task::perform(server_backend.teams(), |result| {
-                            MainAppMessage::<S>::UpdatedTeams(result.map_err(|x| x.to_string()))
-                        })
+                        Task::none()
                     }
                     Err(err) => {
                         panic!("something went wrong: {}", err)
@@ -311,72 +297,15 @@ impl<
                 },
                 _ => Task::none(),
             },
-            MainAppMessage::UpdatedTeams(result) => match self.state {
-                MainAppState::Uploading {
-                    ref mut progress_timeline,
-                } => {
-                    match result {
-                        Ok(teams) => {
-                            self.teams = teams;
-                            *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
-                                .duration(Duration::from_millis(1000))
-                                .easing(
-                                    anim::easing::cubic_ease()
-                                        .mode(anim::easing::EasingMode::InOut),
-                                )
-                                .begin_animation();
-                        }
-                        Err(err) => panic!("something went wrong: {}", err),
-                    }
-                    Task::none()
-                }
-                _ => Task::none(),
-            },
-            MainAppMessage::IsUnlockedResponse(result) => match self.state {
-                MainAppState::PaymentRequired { ref mut show_error } => match result {
-                    Ok(maybe_ok) => {
-                        if let Some(is_ok) = maybe_ok {
-                            if is_ok {
-                                self.state = MainAppState::Preview;
-                            } else {
-                                *show_error = true;
-                            }
-                        } else {
-                            self.state = MainAppState::Preview;
-                        }
-                        Task::none()
-                    }
-                    Err(err) => {
-                        panic!("failed to update is_unlocked: {}", err);
-                    }
-                },
-                _ => Task::none(),
-            },
             MainAppMessage::KeyReleased(key) => match &mut self.state {
                 MainAppState::PaymentRequired { .. } => match key {
-                    KeyMessage::Up => {
-                        self.team_index =
-                            (self.team_index + self.teams.len() - 1) % self.teams.len();
-                        scrollable::scroll_to(
-                            Id::new("team_scrollable"),
-                            AbsoluteOffset {
-                                y: (64.0 + 8.0) * self.team_index as f32 - 80.0,
-                                x: 0.0,
-                            },
-                        )
-                    }
-                    KeyMessage::Down => {
-                        self.team_index = (self.team_index + 1) % self.teams.len();
-                        scrollable::scroll_to(
-                            Id::new("team_scrollable"),
-                            AbsoluteOffset {
-                                y: (64.0 + 8.0) * self.team_index as f32 - 80.0,
-                                x: 0.0,
-                            },
-                        )
-                    }
+                    KeyMessage::Up => Task::none(),
+                    KeyMessage::Down => Task::none(),
                     KeyMessage::Space => {
-                        Task::done(MainAppMessage::IsUnlockedResponse(Ok(Some(true))))
+                        self.state = MainAppState::CapturePhotosPrepare {
+                            ready_timeline: animations::ready::animation().begin_animation(),
+                        };
+                        Task::none()
                     }
                 },
                 MainAppState::Preview => {
@@ -395,15 +324,6 @@ impl<
                     Task::none()
                 }
                 _ => Task::none(),
-            },
-            MainAppMessage::TeamsResponse(result) => match result {
-                Ok(teams) => {
-                    self.teams = teams;
-                    Task::none()
-                }
-                Err(err) => {
-                    panic!("failed to get teams: {}", err);
-                }
             },
         }
     }
@@ -439,18 +359,9 @@ impl<
                                     })
                                     .into(),
                                 vertical_space().height(6).into(),
-                                scrollable(
-                                    column(self.teams.iter().enumerate().map(|(i, team)| {
-                                        team_row(
-                                            &team.name,
-                                            i == self.team_index,
-                                            matches!(team.mug_url, Some(_)),
-                                        )
-                                    }))
-                                    .spacing(8),
-                                )
-                                .id(Id::new("team_scrollable"))
-                                .into(),
+                                scrollable(column([]).spacing(8))
+                                    .id(Id::new("team_scrollable"))
+                                    .into(),
                                 vertical_space().height(12).into(),
                                 if *show_error {
                                     column([
@@ -562,7 +473,7 @@ impl<
                             template_preview_timeline.value(),
                         )
                         .into(),
-                        title_text(&self.teams[self.team_index].name)
+                        title_text("Test")
                             .shaping(iced::widget::text::Shaping::Advanced)
                             .into(),
                         supporting_text("The team listed above has been confirmed. Proceed.")

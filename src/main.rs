@@ -162,13 +162,17 @@ impl<
 }
 
 fn main() -> iced::Result {
+    // Set up logging
+    env_logger::init();
+    log::info!("Starting Photo Booth");
+
     type CameraBackend = DefaultCameraBackend;
     type ServerBackend = DefaultServerBackend;
 
     CameraBackend::initialize().expect("failed to initialize camera backend");
 
     iced::application(
-        "Shrimp Games Check-in",
+        "Photo Booth",
         PhotoBoothApplication::update,
         PhotoBoothApplication::view,
     )
@@ -181,7 +185,7 @@ fn main() -> iced::Result {
     .default_font(Font::with_name("Poor Story"))
     .theme(|_| {
         iced::Theme::custom(
-            "Shrimp Game".to_owned(),
+            "CAJ".to_owned(),
             Palette {
                 background: iced::Color::from_rgb8(0x4e, 0x2a, 0x25),
                 text: iced::Color::from_rgb8(0xff, 0xff, 0xff),
