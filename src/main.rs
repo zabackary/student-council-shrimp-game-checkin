@@ -180,16 +180,16 @@ fn main() -> iced::Result {
         "../assets/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf"
     ))
     .font(include_bytes!(
-        "../assets/fonts/Poor_Story/PoorStory-Regular.ttf"
+        "../assets/fonts/Montserrat/Montserrat-Regular.ttf"
     ))
-    .default_font(Font::with_name("Poor Story"))
+    .default_font(Font::with_name("Montserrat"))
     .theme(|_| {
         iced::Theme::custom(
             "CAJ".to_owned(),
             Palette {
-                background: iced::Color::from_rgb8(0x4e, 0x2a, 0x25),
+                background: iced::Color::from_rgb8(0xbb, 0xbb, 0xdd),
                 text: iced::Color::from_rgb8(0xff, 0xff, 0xff),
-                primary: iced::Color::from_rgb8(0xf8, 0x46, 0xaa),
+                primary: iced::Color::from_rgb8(0x01, 0x00, 0x80),
                 success: iced::Color::from_rgb8(0x00, 0xff, 0x00),
                 danger: iced::Color::from_rgb8(0xff, 0x00, 0x00),
             },

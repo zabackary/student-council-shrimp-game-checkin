@@ -3,22 +3,18 @@ use std::time::Duration;
 use anim::Animation;
 use iced::{
     widget::{
-        column, container,
-        image::Handle,
-        progress_bar, scrollable,
-        scrollable::{AbsoluteOffset, Id},
-        vertical_space, Space,
+        column, container, horizontal_space, image::Handle, progress_bar, row, vertical_space,
+        Space,
     },
-    Alignment, ContentFit, Element, Length, Task,
+    Alignment, Color, ContentFit, Element, Length, Task,
 };
 use image::RgbaImage;
 
-use crate::{AppPage, KeyMessage, PhotoBoothMessage};
+use crate::{backend::render_take::render_take, AppPage, KeyMessage, PhotoBoothMessage};
 
 use super::{
     camera_feed::{CameraFeed, CameraFeedOptions},
     loading_spinners,
-    team_row::team_row,
     title_overlay::{supporting_text, title_overlay, title_text},
 };
 
@@ -61,6 +57,7 @@ enum MainAppState {
         template_preview_timeline: anim::Timeline<animations::upsell_templates::AnimationState>,
         template_index: usize,
     },
+    EmailEntry,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +77,11 @@ pub struct MainApp<
     state: MainAppState,
     captured_photos: Vec<RgbaImage>,
     previews: Vec<iced::widget::image::Handle>,
+    strip: Option<RgbaImage>,
+    strip_handle: Option<Handle>,
+    logo_handle: Handle,
+    emails: Vec<String>,
+    upload_handle: Option<S::UploadHandle>,
     pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
@@ -96,6 +98,14 @@ impl<
                 new_page: None,
                 captured_photos: Vec::with_capacity(PHOTO_COUNT),
                 previews: Vec::with_capacity(PHOTO_COUNT),
+                logo_handle: Handle::from_bytes(
+                    include_bytes!("../../assets/75thAnniversaryLogo.jpg").to_vec(),
+                ),
+                strip: None,
+                strip_handle: None,
+
+                emails: Vec::new(),
+                upload_handle: None,
             },
             Task::none(),
         )
@@ -220,7 +230,7 @@ impl<
                             } else {
                                 self.state = MainAppState::Uploading {
                                     progress_timeline: anim::Options::new(0.0, 0.6)
-                                        .duration(Duration::from_millis(8000))
+                                        .duration(Duration::from_millis(12000))
                                         .easing(
                                             anim::easing::cubic_ease()
                                                 .mode(anim::easing::EasingMode::Out),
@@ -236,7 +246,14 @@ impl<
                                         photo.as_raw().clone(),
                                     ));
                                 }
-                                let future = server_backend.upload_photo(old[0].clone(), old);
+                                self.strip = Some(render_take(old.clone()));
+                                self.strip_handle = Some(Handle::from_rgba(
+                                    self.strip.as_ref().unwrap().width(),
+                                    self.strip.as_ref().unwrap().height(),
+                                    self.strip.as_ref().unwrap().as_raw().clone(),
+                                ));
+                                let future = server_backend
+                                    .upload_photo(self.strip.as_ref().unwrap().clone(), old);
                                 Task::perform(future, |result| {
                                     MainAppMessage::Uploaded(result.map_err(|x| x.to_string()))
                                 })
@@ -251,7 +268,9 @@ impl<
                     {
                         self.state = MainAppState::EditPrintUpsellBanner {
                             progress_timeline: anim::Options::new(0.0, 1.0)
-                                .duration(Duration::from_millis(4000))
+                                .duration(Duration::from_millis(
+                                    animations::upsell_templates::ANIMATION_LENGTH,
+                                ))
                                 .easing(anim::easing::linear())
                                 .begin_animation(),
                             template_preview_timeline: animations::upsell_templates::animation()
@@ -272,7 +291,7 @@ impl<
                             animations::upsell_templates::animation().begin_animation()
                     }
                     if progress_timeline.update().is_completed() {
-                        self.state = MainAppState::PaymentRequired { show_error: false };
+                        self.state = MainAppState::EmailEntry;
                     }
                     Task::none()
                 }
@@ -282,7 +301,8 @@ impl<
                 MainAppState::Uploading {
                     ref mut progress_timeline,
                 } => match result {
-                    Ok(_) => {
+                    Ok(res) => {
+                        self.upload_handle = Some(res);
                         *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
                             .duration(Duration::from_millis(2000))
                             .easing(
@@ -292,7 +312,9 @@ impl<
                         Task::none()
                     }
                     Err(err) => {
-                        panic!("something went wrong: {}", err)
+                        self.state = MainAppState::PaymentRequired { show_error: true };
+                        log::error!("Error uploading photos: {}", err);
+                        Task::none()
                     }
                 },
                 _ => Task::none(),
@@ -302,9 +324,7 @@ impl<
                     KeyMessage::Up => Task::none(),
                     KeyMessage::Down => Task::none(),
                     KeyMessage::Space => {
-                        self.state = MainAppState::CapturePhotosPrepare {
-                            ready_timeline: animations::ready::animation().begin_animation(),
-                        };
+                        self.state = MainAppState::Preview;
                         Task::none()
                     }
                 },
@@ -352,16 +372,26 @@ impl<
                     container(
                         container(
                             column([
-                                iced::widget::text("Shrimp Game Check-in")
+                                iced::widget::text("CAJ 75th Anniversary Photo Booth")
                                     .size(42)
                                     .style(|theme: &iced::Theme| iced::widget::text::Style {
-                                        color: Some(theme.extended_palette().background.base.text),
+                                        color: Some(theme.extended_palette().primary.base.text),
                                     })
                                     .into(),
                                 vertical_space().height(6).into(),
-                                scrollable(column([]).spacing(8))
-                                    .id(Id::new("team_scrollable"))
+                                iced::widget::image(self.logo_handle.clone())
+                                    .width(500)
+                                    .height(500)
+                                    .content_fit(ContentFit::Contain)
                                     .into(),
+                                vertical_space().height(6).into(),
+                                iced::widget::text("Press [SPACE] to get started.")
+                                    .size(24)
+                                    .into(),
+                                    vertical_space().height(12).into(),
+                                    iced::widget::text("By using this photo booth, you consent to having your photos uploaded and processed by our servers and Google Drive.")
+                                        .size(18)
+                                        .into(),
                                 vertical_space().height(12).into(),
                                 if *show_error {
                                     column([
@@ -397,15 +427,8 @@ impl<
                         .padding(18)
                         .style(|theme: &iced::Theme| container::Style {
                             border: iced::Border::default().rounded(28),
-                            background: Some(
-                                theme
-                                    .extended_palette()
-                                    .background
-                                    .strong
-                                    .color
-                                    .scale_alpha(0.2)
-                                    .into(),
-                            ),
+                            background: Some(theme.extended_palette().primary.base.color.into()),
+                            text_color: Some(Color::from_rgb8(0xff, 0xff, 0xff)),
                             ..Default::default()
                         }),
                     )
@@ -415,9 +438,8 @@ impl<
                 .into(),
                 MainAppState::Preview => title_overlay(
                     column([
-                        title_text("Entering the games requires creating visual identification.")
-                            .into(),
-                        supporting_text("Press space to create your official photograph.").into(),
+                        title_text("Get read to take your pictures").into(),
+                        supporting_text("Press [SPACE] to start when you're ready.").into(),
                         vertical_space().height(12.0).into(),
                     ]),
                     true,
@@ -452,8 +474,8 @@ impl<
                         )
                         .center(Length::Fill)
                         .into(),
-                        title_text("We're uploading your team photos now.").into(),
-                        supporting_text("You may proceed shortly.").into(),
+                        title_text("We're uploading your photos now.").into(),
+                        supporting_text("You'll be able to enter your emails in a second.").into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(8.0)
@@ -473,11 +495,8 @@ impl<
                             template_preview_timeline.value(),
                         )
                         .into(),
-                        title_text("Test")
-                            .shaping(iced::widget::text::Shaping::Advanced)
-                            .into(),
-                        supporting_text("The team listed above has been confirmed. Proceed.")
-                            .into(),
+                        title_text("Your photos are ready!").into(),
+                        supporting_text("On the next screen, enter your emails.").into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(4.0)
@@ -486,6 +505,38 @@ impl<
                     false,
                 )
                 .into(),
+                MainAppState::EmailEntry => title_overlay(
+                    row([
+                        column([
+                            title_text("Enter your email addresses").into(),
+                            supporting_text("Press [ENTER] to add an email.").into(),
+                            vertical_space().height(12.0).into(),
+                            container(
+                                column(self.emails.iter().map(|email| {
+                                    iced::widget::text(email)
+                                        .size(24)
+                                        .style(|theme: &iced::Theme| iced::widget::text::Style {
+                                            color: Some(
+                                                theme.extended_palette().background.base.text,
+                                            ),
+                                        })
+                                        .into()
+                                }))
+                                .align_x(Alignment::Center),
+                            )
+                            .center(Length::Fill)
+                            .into(),
+                        ])
+                        .into(),
+                        horizontal_space().width(12.0).into(),
+                        iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .content_fit(ContentFit::Contain)
+                            .into(),
+                    ]),
+                    false,
+                ),
             },
         ])
         .into()

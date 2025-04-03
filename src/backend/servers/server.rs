@@ -89,27 +89,33 @@ impl super::ServerBackend for SupabaseBackend {
         let now = chrono::offset::Local::now().to_string();
 
         // Create a new folder in Google Drive
-        let folder_name = now;
+        log::debug!(
+            "Creating folder in Google Drive in folder {}",
+            dotenv!("DRIVE_FOLDER_ID")
+        );
+        let folder_name = now.clone();
         let folder_metadata = json!({
             "name": folder_name,
             "mimeType": "application/vnd.google-apps.folder",
             "parents": [dotenv!("DRIVE_FOLDER_ID")],
+            "description": format!("Uploaded at {} by photo-booth-v2", now.clone())
         });
-        let folder_response = self
+        let request = self
             .client
-            .post("https://www.googleapis.com/upload/drive/v3/files")
-            .header("Authorization", format!("Bearer {}", token.as_str()))
+            .post("https://www.googleapis.com/drive/v3/files")
+            .query(&[("supportsAllDrives", "true")])
+            .body(folder_metadata.to_string())
             .header(
                 "Content-Type",
                 HeaderValue::from_static("application/json;charset=UTF-8"),
             )
-            .body(folder_metadata.to_string())
+            .header("Authorization", format!("Bearer {}", token.as_str()));
+        let folder: PartialFileMetadata = request
             .send()
             .await
             .map_err(SupabaseBackendError::Reqwest)?
             .error_for_status()
-            .map_err(SupabaseBackendError::Reqwest)?;
-        let folder: PartialFileMetadata = folder_response
+            .map_err(SupabaseBackendError::Reqwest)?
             .json()
             .await
             .map_err(SupabaseBackendError::Reqwest)?;
