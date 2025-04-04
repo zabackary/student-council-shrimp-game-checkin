@@ -39,6 +39,7 @@ impl Default for CameraFeedOptions {
     }
 }
 
+#[allow(unused)]
 impl<C: crate::backend::cameras::CameraBackendCamera + 'static> CameraFeed<C> {
     pub fn new(camera: C, options: CameraFeedOptions) -> (Self, Task<CameraMessage>) {
         (

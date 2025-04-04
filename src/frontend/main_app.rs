@@ -618,7 +618,7 @@ impl<
                 MainAppState::EditPrintUpsellBanner {
                     progress_timeline,
                     template_preview_timeline,
-                    template_index,
+                    template_index: _template_index,
                 } => title_overlay(
                     column([
                         animations::upsell_templates::view(
@@ -641,7 +641,7 @@ impl<
                     row([
                         column([
                             title_text("Enter your email addresses").into(),
-                            supporting_text("Press [ENTER] to add an email.").into(),
+                            supporting_text("Start typing to add an email.").into(),
                             vertical_space().height(12.0).into(),
                             container(
                                 column([
@@ -713,7 +713,7 @@ impl<
                                                 .size(14)
                                                 .into(),
                                             container(
-                                                iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap())
+                                                iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap()).cell_size(8)
                                             ).center(Length::Fill).into()
                                         ])
                                     ).height(Length::Fill).into()

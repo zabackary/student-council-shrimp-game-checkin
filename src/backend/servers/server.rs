@@ -9,7 +9,7 @@ use reqwest::{
     Client,
 };
 use serde_json::json;
-use tokio::{join, try_join};
+use tokio::try_join;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PartialFileMetadata {
@@ -125,28 +125,26 @@ impl super::ServerBackend for SupabaseBackend {
         log::debug!("Uploaded folder");
         log::debug!("Folder ID: {}", folder_id);
 
-        // Upload the strip
-
-        let mut encoded = Vec::new();
-        let mut encoded_cursor = Cursor::new(&mut encoded);
-        strip
-            .write_to(&mut encoded_cursor, image::ImageFormat::Png)
-            .map_err(SupabaseBackendError::ImageEncodeDecode)?;
-        let file = upload_file(
-            encoded,
-            "strip.png".to_string(),
-            "image/png",
-            folder_id.clone(),
-            self.client.clone(),
-            token.clone(),
-        )
-        .await?;
-        let strip_id = file.id;
-
-        // Make the strip publicly accessible
-
-        try_join!(
+        let (strip_id, _) = try_join!(
             async {
+                // Upload the strip
+                let mut encoded = Vec::new();
+                let mut encoded_cursor = Cursor::new(&mut encoded);
+                strip
+                    .write_to(&mut encoded_cursor, image::ImageFormat::Png)
+                    .map_err(SupabaseBackendError::ImageEncodeDecode)?;
+                let file = upload_file(
+                    encoded,
+                    "strip.png".to_string(),
+                    "image/png",
+                    folder_id.clone(),
+                    self.client.clone(),
+                    token.clone(),
+                )
+                .await?;
+
+                // Make the strip publicly accessible
+                let strip_id = file.id;
                 let res = self
                     .client
                     .post(format!(
@@ -170,9 +168,10 @@ impl super::ServerBackend for SupabaseBackend {
                     .map_err(SupabaseBackendError::Reqwest)?;
                 log::debug!("Permissions res: {:?}", res.text().await);
                 log::debug!("Uploaded strip and permissions");
-                Ok(())
+                Ok(strip_id)
             },
             async {
+                // Upload the photos in parallel
                 let futures = photos.into_iter().enumerate().map(|(i, photo)| {
                     let folder_id = folder_id.clone();
                     let client = self.client.clone();
