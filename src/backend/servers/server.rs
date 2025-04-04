@@ -9,6 +9,7 @@ use reqwest::{
     Client,
 };
 use serde_json::json;
+use tokio::{join, try_join};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct PartialFileMetadata {
@@ -142,22 +143,72 @@ impl super::ServerBackend for SupabaseBackend {
         .await?;
         let strip_id = file.id;
 
-        for (i, photo) in photos.iter().enumerate() {
-            let mut encoded = Vec::new();
-            let mut encoded_cursor = Cursor::new(&mut encoded);
-            photo
-                .write_to(&mut encoded_cursor, image::ImageFormat::Png)
-                .map_err(SupabaseBackendError::ImageEncodeDecode)?;
-            upload_file(
-                encoded,
-                format!("photo_{}.png", i + 1),
-                "image/png",
-                folder_id.clone(),
-                self.client.clone(),
-                token.clone(),
-            )
-            .await?;
-        }
+        // Make the strip publicly accessible
+
+        try_join!(
+            async {
+                let res = self
+                    .client
+                    .post(format!(
+                        "https://www.googleapis.com/drive/v3/files/{}/permissions",
+                        strip_id
+                    ))
+                    .body(
+                        json!({
+                            "type": "anyone",
+                            "role": "reader"
+                        })
+                        .to_string(),
+                    )
+                    .header(
+                        "Content-Type",
+                        HeaderValue::from_static("application/json;charset=UTF-8"),
+                    )
+                    .header("Authorization", format!("Bearer {}", token.as_str()))
+                    .send()
+                    .await
+                    .map_err(SupabaseBackendError::Reqwest)?;
+                log::debug!("Permissions res: {:?}", res.text().await);
+                log::debug!("Uploaded strip and permissions");
+                Ok(())
+            },
+            async {
+                let futures = photos.into_iter().enumerate().map(|(i, photo)| {
+                    let folder_id = folder_id.clone();
+                    let client = self.client.clone();
+                    let token = token.clone();
+                    async move {
+                        let mut encoded = Vec::new();
+                        let mut encoded_cursor = Cursor::new(&mut encoded);
+                        photo
+                            .write_to(&mut encoded_cursor, image::ImageFormat::Png)
+                            .map_err(SupabaseBackendError::ImageEncodeDecode)?;
+                        upload_file(
+                            encoded,
+                            format!("photo_{}.png", i + 1),
+                            "image/png",
+                            folder_id,
+                            client,
+                            token,
+                        )
+                        .await?;
+                        Ok(())
+                    }
+                });
+
+                let mut handles = Vec::with_capacity(futures.len());
+
+                for fut in futures {
+                    handles.push(tokio::spawn(fut));
+                }
+
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    results.push(handle.await.unwrap()?);
+                }
+                Ok(())
+            }
+        )?;
 
         Ok(UploadHandle {
             strip_id,
@@ -207,6 +258,10 @@ impl super::ServerBackend for SupabaseBackend {
             res.json().await.map_err(SupabaseBackendError::Reqwest)?;
 
         Ok(email_response.is_success())
+    }
+
+    fn get_link(self, handle: Self::UploadHandle) -> String {
+        format!("https://drive.google.com/uc?id={}", handle.strip_id)
     }
 }
 

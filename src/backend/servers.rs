@@ -21,6 +21,8 @@ pub trait ServerBackend: Clone + Send {
         handle: Self::UploadHandle,
         emails: Vec<String>,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send;
+
+    fn get_link(self, handle: Self::UploadHandle) -> String;
 }
 
 pub type DefaultServerBackend = server::SupabaseBackend;

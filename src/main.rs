@@ -107,21 +107,7 @@ impl<
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
-            PhotoBoothMessage::EscapeReleased => iced::window::get_latest().then(|id| {
-                iced::Task::batch([
-                    iced::window::get_mode(id.unwrap()).then(move |mode| {
-                        iced::window::change_mode(
-                            id.unwrap(),
-                            match mode {
-                                iced::window::Mode::Fullscreen => iced::window::Mode::Windowed,
-                                iced::window::Mode::Windowed => iced::window::Mode::Fullscreen,
-                                iced::window::Mode::Hidden => iced::window::Mode::Windowed,
-                            },
-                        )
-                    }),
-                    iced::window::toggle_decorations(id.unwrap()),
-                ])
-            }),
+            PhotoBoothMessage::EscapeReleased => Task::none(),
         }
     }
 

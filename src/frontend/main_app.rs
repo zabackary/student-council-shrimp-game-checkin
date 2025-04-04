@@ -39,7 +39,7 @@ enum CapturePhotosState {
 
 enum MainAppState {
     PaymentRequired {
-        show_error: bool,
+        error: Option<String>,
     },
     Preview,
     CapturePhotosPrepare {
@@ -58,6 +58,9 @@ enum MainAppState {
         template_index: usize,
     },
     EmailEntry,
+    Emailing {
+        progress_timeline: anim::Timeline<f32>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,10 @@ pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     KeyReleased(KeyMessage),
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
+    Emailed(Result<bool, String>),
+
+    EmailInput(String),
+    EmailSubmit,
 }
 
 pub struct MainApp<
@@ -82,6 +89,7 @@ pub struct MainApp<
     logo_handle: Handle,
     emails: Vec<String>,
     upload_handle: Option<S::UploadHandle>,
+    qr_code_data: Option<iced::widget::qr_code::Data>,
     pub new_page: Option<Box<(AppPage<C, S>, Task<PhotoBoothMessage<C, S>>)>>,
 }
 
@@ -94,7 +102,7 @@ impl<
         (
             Self {
                 feed,
-                state: MainAppState::PaymentRequired { show_error: false },
+                state: MainAppState::PaymentRequired { error: None },
                 new_page: None,
                 captured_photos: Vec::with_capacity(PHOTO_COUNT),
                 previews: Vec::with_capacity(PHOTO_COUNT),
@@ -103,6 +111,7 @@ impl<
                 ),
                 strip: None,
                 strip_handle: None,
+                qr_code_data: None,
 
                 emails: Vec::new(),
                 upload_handle: None,
@@ -142,6 +151,7 @@ impl<
         match message {
             MainAppMessage::Camera(msg) => self.feed.update(msg).map(MainAppMessage::Camera),
             MainAppMessage::CaptureStill => {
+                log::debug!("Capturing still image...");
                 let image = self
                     .feed
                     .capture_still_sync(CameraFeedOptions {
@@ -150,6 +160,7 @@ impl<
                         ..Default::default()
                     })
                     .expect("failed to capture image");
+                log::debug!("Image captured successfully.");
                 self.captured_photos.push(image);
                 match &mut self.state {
                     MainAppState::CapturePhotos { state, .. } => {
@@ -292,59 +303,174 @@ impl<
                     }
                     if progress_timeline.update().is_completed() {
                         self.state = MainAppState::EmailEntry;
+                        self.emails = vec!["".to_string(); 1];
                     }
                     Task::none()
                 }
                 _ => Task::none(),
             },
-            MainAppMessage::Uploaded(result) => match self.state {
-                MainAppState::Uploading {
-                    ref mut progress_timeline,
-                } => match result {
-                    Ok(res) => {
-                        self.upload_handle = Some(res);
+            MainAppMessage::Uploaded(result) => {
+                log::debug!("Upload result received: {:?}", result);
+                match self.state {
+                    MainAppState::Uploading {
+                        ref mut progress_timeline,
+                    } => match result {
+                        Ok(res) => {
+                            self.upload_handle = Some(res);
+                            self.qr_code_data = Some(
+                                iced::widget::qr_code::Data::new(
+                                    server_backend
+                                        .get_link(self.upload_handle.as_ref().unwrap().clone()),
+                                )
+                                .expect("could not create qr code"),
+                            );
+                            *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
+                                .duration(Duration::from_millis(2000))
+                                .easing(
+                                    anim::easing::cubic_ease()
+                                        .mode(anim::easing::EasingMode::InOut),
+                                )
+                                .begin_animation();
+                            Task::none()
+                        }
+                        Err(err) => {
+                            self.state = MainAppState::PaymentRequired {
+                                error: Some(
+                                    "The photos could not be uploaded. Please try again."
+                                        .to_string(),
+                                ),
+                            };
+                            log::error!("Error uploading photos: {}", err);
+                            Task::none()
+                        }
+                    },
+                    _ => Task::none(),
+                }
+            }
+            MainAppMessage::KeyReleased(key) => {
+                log::debug!("Key released: {:?}", key);
+                match &mut self.state {
+                    MainAppState::PaymentRequired { .. } => match key {
+                        KeyMessage::Up => Task::none(),
+                        KeyMessage::Down => Task::none(),
+                        KeyMessage::Space => {
+                            self.state = MainAppState::Preview;
+                            Task::none()
+                        }
+                    },
+                    MainAppState::Preview => {
+                        self.state = MainAppState::CapturePhotosPrepare {
+                            ready_timeline: animations::ready::animation().begin_animation(),
+                        };
+                        Task::none()
+                    }
+                    MainAppState::EditPrintUpsellBanner {
+                        progress_timeline, ..
+                    } => {
                         *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
-                            .duration(Duration::from_millis(2000))
+                            .duration(Duration::from_millis(1000))
                             .easing(
                                 anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut),
                             )
                             .begin_animation();
                         Task::none()
                     }
-                    Err(err) => {
-                        self.state = MainAppState::PaymentRequired { show_error: true };
-                        log::error!("Error uploading photos: {}", err);
-                        Task::none()
-                    }
-                },
-                _ => Task::none(),
-            },
-            MainAppMessage::KeyReleased(key) => match &mut self.state {
-                MainAppState::PaymentRequired { .. } => match key {
-                    KeyMessage::Up => Task::none(),
-                    KeyMessage::Down => Task::none(),
-                    KeyMessage::Space => {
-                        self.state = MainAppState::Preview;
-                        Task::none()
-                    }
-                },
-                MainAppState::Preview => {
-                    self.state = MainAppState::CapturePhotosPrepare {
-                        ready_timeline: animations::ready::animation().begin_animation(),
-                    };
-                    Task::none()
+                    _ => Task::none(),
                 }
-                MainAppState::EditPrintUpsellBanner {
-                    progress_timeline, ..
-                } => {
-                    *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
-                        .duration(Duration::from_millis(1000))
-                        .easing(anim::easing::cubic_ease().mode(anim::easing::EasingMode::InOut))
-                        .begin_animation();
-                    Task::none()
+            }
+            MainAppMessage::EmailInput(email) => {
+                log::debug!("Email input received: {}", email);
+                if self.emails.is_empty() {
+                    self.emails.push(email);
+                } else {
+                    self.emails[0] = email;
                 }
-                _ => Task::none(),
-            },
+                Task::none()
+            }
+            MainAppMessage::EmailSubmit => {
+                log::debug!("Email submit triggered. Current emails: {:?}", self.emails);
+                if self.emails[0].len() > 0 {
+                    self.emails.splice(0..0, ["".to_string()]);
+                    Task::none()
+                } else {
+                    self.emails.pop();
+                    if self.emails.is_empty() {
+                        self.state = MainAppState::PaymentRequired { error: None };
+                        Task::none()
+                    } else {
+                        if let Some(upload_handle) = self.upload_handle.take() {
+                            let future =
+                                server_backend.send_email(upload_handle, self.emails.clone());
+                            self.state = MainAppState::Emailing {
+                                progress_timeline: anim::Options::new(0.0, 1.0)
+                                    .duration(Duration::from_millis(5000))
+                                    .easing(
+                                        anim::easing::cubic_ease()
+                                            .mode(anim::easing::EasingMode::InOut),
+                                    )
+                                    .begin_animation(),
+                            };
+                            self.emails.clear();
+                            self.strip_handle = None;
+                            self.strip = None;
+                            log::trace!("Sending email with photos...");
+                            Task::perform(future, |result| {
+                                MainAppMessage::Emailed(result.map_err(|x| x.to_string()))
+                            })
+                        } else {
+                            log::error!("No upload handle available for emailing.");
+                            self.state = MainAppState::PaymentRequired {
+                                error: Some(
+                                    "The photos could not be emailed. Please try again."
+                                        .to_string(),
+                                ),
+                            };
+                            Task::none()
+                        }
+                    }
+                }
+            }
+            MainAppMessage::Emailed(result) => {
+                log::debug!("Email result received: {:?}", result);
+                match self.state {
+                    MainAppState::Emailing {
+                        ref mut progress_timeline,
+                    } => match result {
+                        Ok(all_success) => {
+                            if all_success {
+                                *progress_timeline =
+                                    anim::Options::new(progress_timeline.value(), 1.0)
+                                        .duration(Duration::from_millis(1000))
+                                        .easing(
+                                            anim::easing::cubic_ease()
+                                                .mode(anim::easing::EasingMode::InOut),
+                                        )
+                                        .begin_animation();
+                                self.state = MainAppState::PaymentRequired { error: None };
+                            } else {
+                                self.state = MainAppState::PaymentRequired {
+                                    error: Some(
+                                        "Some email addresses provided could not be reached. Please contact photobooth@caj.ac.jp for assistance."
+                                            .to_string(),
+                                    ),
+                                };
+                            }
+                            Task::none()
+                        }
+                        Err(err) => {
+                            self.state = MainAppState::PaymentRequired {
+                                error: Some(
+                                    "The photos could not be emailed. Please try again."
+                                        .to_string(),
+                                ),
+                            };
+                            log::error!("Error emailing photos: {}", err);
+                            Task::none()
+                        }
+                    },
+                    _ => Task::none(),
+                }
+            }
         }
     }
 
@@ -368,7 +494,7 @@ impl<
                 .height(Length::Fill)
                 .into(),
             match &self.state {
-                MainAppState::PaymentRequired { show_error } => title_overlay(
+                MainAppState::PaymentRequired { error } => title_overlay(
                     container(
                         container(
                             column([
@@ -393,11 +519,11 @@ impl<
                                         .size(18)
                                         .into(),
                                 vertical_space().height(12).into(),
-                                if *show_error {
+                                if let Some(error_message) = error {
                                     column([
                                         vertical_space().height(12).into(),
                                         container(column([iced::widget::text(
-                                            "An error occurred.",
+                                            error_message
                                         )
                                         .size(12)
                                         .into()]))
@@ -438,7 +564,7 @@ impl<
                 .into(),
                 MainAppState::Preview => title_overlay(
                     column([
-                        title_text("Get read to take your pictures").into(),
+                        title_text("Get ready to take your pictures").into(),
                         supporting_text("Press [SPACE] to start when you're ready.").into(),
                         vertical_space().height(12.0).into(),
                     ]),
@@ -475,7 +601,7 @@ impl<
                         .center(Length::Fill)
                         .into(),
                         title_text("We're uploading your photos now.").into(),
-                        supporting_text("You'll be able to enter your emails in a second.").into(),
+                        supporting_text("You'll be able to enter your email address(es) in a second.").into(),
                         vertical_space().height(12.0).into(),
                         progress_bar(0.0..=1.0, progress_timeline.value())
                             .height(8.0)
@@ -512,31 +638,122 @@ impl<
                             supporting_text("Press [ENTER] to add an email.").into(),
                             vertical_space().height(12.0).into(),
                             container(
-                                column(self.emails.iter().map(|email| {
-                                    iced::widget::text(email)
+                                column([
+                                    row([
+                                        iced::widget::text_input(
+                                            "Enter an email",
+                                            self.emails[0].as_str(),
+                                        )
+                                        .on_input(MainAppMessage::EmailInput)
+                                        .on_submit(MainAppMessage::EmailSubmit)
+                                        .padding(10)
                                         .size(24)
-                                        .style(|theme: &iced::Theme| iced::widget::text::Style {
-                                            color: Some(
-                                                theme.extended_palette().background.base.text,
-                                            ),
+                                        .into(),
+                                        horizontal_space().width(6.0).into(),
+                                        iced::widget::button(iced::widget::text(if self.emails[0].len() > 0 {
+                                            "Press [Enter] to add"
+                                        } else {
+                                            "Press [Enter] to finish"
                                         })
-                                        .into()
-                                }))
+                                        .size(24))
+                                        .on_press(MainAppMessage::EmailSubmit)
+                                        .padding(10)
+                                        .into(),
+                                    ])
+                                    .into(),
+                                    vertical_space().height(12.0).into(),
+                                    container(
+                                        column(
+                                            self.emails
+                                                .iter()
+                                                .skip(1)
+                                                .map(|email| {
+                                                    iced::widget::container(
+                                                        iced::widget::text(email.as_str())
+                                                            .size(24)
+                                                    ).width(Length::Fill)
+                                                        .padding(10)
+                                                        .style(|theme: &iced::Theme| container::Style {
+                                                            background: Some(
+                                                                theme.extended_palette().background.strong.color.into(),
+                                                            ),
+                                                            text_color: Some(
+                                                                theme.extended_palette().background.strong.text,
+                                                            ),
+                                                            ..Default::default()
+                                                        }).into()
+                                                }),
+                                        ).spacing(8),
+                                    )
+                                    .padding(30)
+                                    .style(|theme: &iced::Theme| container::Style {
+                                        background: Some(
+                                            theme.extended_palette().background.base.color.into(),
+                                        ),
+                                        ..Default::default()
+                                    })
+                                    .width(Length::Fill)
+                                    .center(Length::Fill)
+                                    .into(),
+                                    vertical_space().height(12.0).into(),
+                                    container(
+                                column([
+                                            iced::widget::text("Make sure your email provider accepts emails from photobooth@caj.ac.jp.")
+                                                .size(18)
+                                                .into(),
+                                            vertical_space().height(12.0).into(),
+                                            iced::widget::text("Alternatively, scan the QR code below to download your photos and press [ENTER] to continue.")
+                                                .size(14)
+                                                .into(),
+                                            iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap()).into()
+                                        ])
+                                    ).height(Length::Fill).into()
+                                ])
                                 .align_x(Alignment::Center),
                             )
                             .center(Length::Fill)
                             .into(),
                         ])
+                        .padding(10)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
                         .into(),
                         horizontal_space().width(12.0).into(),
-                        iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .content_fit(ContentFit::Contain)
-                            .into(),
+                        column([
+                            supporting_text("Your photos").into(),
+                            vertical_space().height(12.0).into(),
+                            iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .content_fit(ContentFit::Contain)
+                                .into(),
+                        ])
+                        .align_x(Alignment::Center)
+                        .padding(30)
+                        .into(),
                     ]),
                     false,
                 ),
+                MainAppState::Emailing { progress_timeline } => title_overlay(
+                    iced::widget::column([
+                        container(
+                            loading_spinners::Circular::new()
+                                .size(96.0)
+                                .bar_height(10.0)
+                                .easing(&loading_spinners::easing::STANDARD_DECELERATE),
+                        )
+                        .center(Length::Fill)
+                        .into(),
+                        title_text("We're emailing your photos now.").into(),
+                        supporting_text("Check your inbox to download your pictures.").into(),
+                        vertical_space().height(12.0).into(),
+                        progress_bar(0.0..=1.0, progress_timeline.value())
+                            .height(8.0)
+                            .into(),
+                    ]),
+                    false,
+                )
+                .into(),
             },
         ])
         .into()
