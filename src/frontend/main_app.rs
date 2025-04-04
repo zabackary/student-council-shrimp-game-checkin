@@ -71,6 +71,7 @@ pub enum MainAppMessage<S: crate::backend::servers::ServerBackend + 'static> {
     CaptureStill,
     Uploaded(Result<S::UploadHandle, String>),
     Emailed(Result<bool, String>),
+    OtherKeyPress,
 
     EmailInput(String),
     EmailSubmit,
@@ -359,6 +360,7 @@ impl<
                             self.state = MainAppState::Preview;
                             Task::none()
                         }
+                        KeyMessage::Escape => iced::widget::text_input::focus("email_input"),
                     },
                     MainAppState::Preview => {
                         self.state = MainAppState::CapturePhotosPrepare {
@@ -377,11 +379,12 @@ impl<
                             .begin_animation();
                         Task::none()
                     }
+                    MainAppState::EmailEntry => iced::widget::text_input::focus("email_input"),
                     _ => Task::none(),
                 }
             }
+            MainAppMessage::OtherKeyPress => iced::widget::text_input::focus("email_input"),
             MainAppMessage::EmailInput(email) => {
-                log::debug!("Email input received: {}", email);
                 if self.emails.is_empty() {
                     self.emails.push(email);
                 } else {
@@ -619,7 +622,8 @@ impl<
                 } => title_overlay(
                     column([
                         animations::upsell_templates::view(
-                            &self.previews[template_index % self.previews.len()],
+                            //&self.previews[template_index % self.previews.len()],
+                            &self.strip_handle.as_ref().unwrap(),
                             template_preview_timeline.value(),
                         )
                         .into(),
@@ -686,9 +690,9 @@ impl<
                                                             ..Default::default()
                                                         }).into()
                                                 }),
-                                        ).spacing(8),
+                                        ).push(vertical_space()).spacing(8),
                                     )
-                                    .padding(30)
+                                    .padding(12)
                                     .style(|theme: &iced::Theme| container::Style {
                                         background: Some(
                                             theme.extended_palette().background.base.color.into(),
@@ -710,7 +714,7 @@ impl<
                                                 .into(),
                                             container(
                                                 iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap())
-                                            ).center_x(Length::Fill).into()
+                                            ).center(Length::Fill).into()
                                         ])
                                     ).height(Length::Fill).into()
                                 ])
@@ -719,7 +723,7 @@ impl<
                             .center(Length::Fill)
                             .into(),
                         ])
-                        .padding(10)
+                        .padding(30)
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .into(),
@@ -728,7 +732,6 @@ impl<
                             supporting_text("Your photos").into(),
                             vertical_space().height(12.0).into(),
                             iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
-                                .width(Length::Fill)
                                 .height(Length::Fill)
                                 .content_fit(ContentFit::Contain)
                                 .into(),

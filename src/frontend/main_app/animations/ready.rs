@@ -53,7 +53,7 @@ pub fn animation() -> impl anim::Animation<Item = AnimationState> {
 pub fn view<Message: 'static>(animation_state: AnimationState) -> Container<'static, Message> {
     container(column([
         vertical_space().height(animation_state.offset).into(),
-        container(text(format!("Smile for the photograph.")).size(animation_state.text_size))
+        container(text(format!("Ready?")).size(animation_state.text_size))
             .style(move |theme: &iced::Theme| container::Style {
                 text_color: Some(
                     theme

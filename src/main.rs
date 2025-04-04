@@ -41,6 +41,7 @@ enum PhotoBoothMessage<
     EscapeReleased,
     UpReleased,
     DownReleased,
+    OtherKeyRelease,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +49,7 @@ enum KeyMessage {
     Space,
     Up,
     Down,
+    Escape,
 }
 
 impl<
@@ -93,13 +95,15 @@ impl<
             },
             PhotoBoothMessage::SpaceReleased
             | PhotoBoothMessage::DownReleased
-            | PhotoBoothMessage::UpReleased => match &mut self.page {
+            | PhotoBoothMessage::UpReleased
+            | PhotoBoothMessage::EscapeReleased => match &mut self.page {
                 AppPage::MainApp(page) => page
                     .update(
                         MainAppMessage::KeyReleased(match message {
                             PhotoBoothMessage::SpaceReleased => KeyMessage::Space,
                             PhotoBoothMessage::DownReleased => KeyMessage::Down,
                             PhotoBoothMessage::UpReleased => KeyMessage::Up,
+                            PhotoBoothMessage::EscapeReleased => KeyMessage::Escape,
                             _ => unreachable!(),
                         }),
                         self.server_backend.clone(),
@@ -107,7 +111,12 @@ impl<
                     .map(PhotoBoothMessage::MainApp),
                 _ => Task::none(),
             },
-            PhotoBoothMessage::EscapeReleased => Task::none(),
+            PhotoBoothMessage::OtherKeyRelease => match &mut self.page {
+                AppPage::MainApp(page) => page
+                    .update(MainAppMessage::OtherKeyPress, self.server_backend.clone())
+                    .map(PhotoBoothMessage::MainApp),
+                _ => Task::none(),
+            },
         }
     }
 
@@ -141,7 +150,7 @@ impl<
                 | Key::Named(iced::keyboard::key::Named::ArrowDown) => {
                     Some(PhotoBoothMessage::DownReleased)
                 }
-                _ => None,
+                _ => Some(PhotoBoothMessage::OtherKeyRelease),
             }),
         ])
     }
