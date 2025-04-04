@@ -100,11 +100,16 @@ impl<C: crate::backend::cameras::CameraBackendCamera + 'static> CameraFeed<C> {
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(move || {
-                            let frame = cloned_camera
+                            let frame = match cloned_camera
                                 .lock()
                                 .expect("failed to lock camera mutex")
                                 .capture_video_frame()
-                                .expect("failed to capture a video frame");
+                            {
+                                Ok(frame) => frame,
+                                Err(_) => {
+                                    return Handle::from_rgba(0, 0, vec![]);
+                                }
+                            };
 
                             let frame = image_postprocessing(frame, options);
 
