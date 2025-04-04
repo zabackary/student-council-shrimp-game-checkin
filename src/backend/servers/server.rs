@@ -261,7 +261,10 @@ impl super::ServerBackend for SupabaseBackend {
     }
 
     fn get_link(self, handle: Self::UploadHandle) -> String {
-        format!("https://drive.google.com/uc?id={}", handle.strip_id)
+        format!(
+            "https://drive.google.com/uc?id={}&export=download",
+            handle.strip_id
+        )
     }
 }
 

@@ -304,8 +304,10 @@ impl<
                     if progress_timeline.update().is_completed() {
                         self.state = MainAppState::EmailEntry;
                         self.emails = vec!["".to_string(); 1];
+                        iced::widget::text_input::focus("email_input")
+                    } else {
+                        Task::none()
                     }
-                    Task::none()
                 }
                 _ => Task::none(),
             },
@@ -393,7 +395,7 @@ impl<
                     self.emails.splice(0..0, ["".to_string()]);
                     Task::none()
                 } else {
-                    self.emails.pop();
+                    self.emails.splice(0..1, []);
                     if self.emails.is_empty() {
                         self.state = MainAppState::PaymentRequired { error: None };
                         Task::none()
@@ -648,6 +650,7 @@ impl<
                                         .on_submit(MainAppMessage::EmailSubmit)
                                         .padding(10)
                                         .size(24)
+                                        .id("email_input")
                                         .into(),
                                         horizontal_space().width(6.0).into(),
                                         iced::widget::button(iced::widget::text(if self.emails[0].len() > 0 {
@@ -705,7 +708,9 @@ impl<
                                             iced::widget::text("Alternatively, scan the QR code below to download your photos and press [ENTER] to continue.")
                                                 .size(14)
                                                 .into(),
-                                            iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap()).into()
+                                            container(
+                                                iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap())
+                                            ).center_x(Length::Fill).into()
                                         ])
                                     ).height(Length::Fill).into()
                                 ])
