@@ -3,8 +3,8 @@ use std::time::Duration;
 use anim::Animation;
 use iced::{
     widget::{
-        column, container, horizontal_space, image::Handle, progress_bar, row, vertical_space,
-        Space,
+        column, container, horizontal_space, image::Handle, progress_bar, row, text,
+        vertical_space, Space,
     },
     Alignment, Color, ContentFit, Element, Length, Task,
 };
@@ -19,9 +19,14 @@ use super::{
 };
 
 mod animations;
+mod status_overlay;
 
 const PHOTO_ASPECT_RATIO: f32 = 3.0 / 2.0;
 const PHOTO_COUNT: usize = 4;
+
+const QR_CODE_QUIET_ZONE: usize = 2;
+const QR_CODE_VERSION: iced::widget::qr_code::Version = iced::widget::qr_code::Version::Normal(5);
+const QR_CODE_SIDE_LENGTH: usize = QR_CODE_QUIET_ZONE * 2 + (5 * 4 + 17);
 
 enum CapturePhotosState {
     Countdown {
@@ -49,13 +54,9 @@ enum MainAppState {
         current: usize,
         state: CapturePhotosState,
     },
-    Uploading {
-        progress_timeline: anim::Timeline<f32>,
-    },
-    EditPrintUpsellBanner {
+    RenderedPreview {
         progress_timeline: anim::Timeline<f32>,
         template_preview_timeline: anim::Timeline<animations::upsell_templates::AnimationState>,
-        template_index: usize,
     },
     EmailEntry,
     Emailing {
@@ -240,15 +241,6 @@ impl<
                                 };
                                 Task::none()
                             } else {
-                                self.state = MainAppState::Uploading {
-                                    progress_timeline: anim::Options::new(0.0, 0.6)
-                                        .duration(Duration::from_millis(12000))
-                                        .easing(
-                                            anim::easing::cubic_ease()
-                                                .mode(anim::easing::EasingMode::Out),
-                                        )
-                                        .begin_animation(),
-                                };
                                 let old = self.captured_photos.drain(..).collect::<Vec<_>>();
                                 self.previews.clear();
                                 for photo in &old {
@@ -264,6 +256,18 @@ impl<
                                     self.strip.as_ref().unwrap().height(),
                                     self.strip.as_ref().unwrap().as_raw().clone(),
                                 ));
+                                self.upload_handle = None;
+                                self.qr_code_data = None;
+                                self.state = MainAppState::RenderedPreview {
+                                    progress_timeline: anim::Options::new(0.0, 1.0)
+                                        .duration(Duration::from_millis(
+                                            animations::upsell_templates::ANIMATION_LENGTH,
+                                        ))
+                                        .easing(anim::easing::linear())
+                                        .begin_animation(),
+                                    template_preview_timeline:
+                                        animations::upsell_templates::animation().begin_animation(),
+                                };
                                 let future = server_backend
                                     .upload_photo(self.strip.as_ref().unwrap().clone(), old);
                                 Task::perform(future, |result| {
@@ -275,34 +279,14 @@ impl<
                         }
                     }
                 },
-                MainAppState::Uploading { progress_timeline } => {
-                    if progress_timeline.update().is_completed() && progress_timeline.value() == 1.0
-                    {
-                        self.state = MainAppState::EditPrintUpsellBanner {
-                            progress_timeline: anim::Options::new(0.0, 1.0)
-                                .duration(Duration::from_millis(
-                                    animations::upsell_templates::ANIMATION_LENGTH,
-                                ))
-                                .easing(anim::easing::linear())
-                                .begin_animation(),
-                            template_preview_timeline: animations::upsell_templates::animation()
-                                .begin_animation(),
-                            template_index: 0,
-                        }
-                    }
-                    Task::none()
-                }
-                MainAppState::EditPrintUpsellBanner {
+                MainAppState::RenderedPreview {
                     progress_timeline,
                     template_preview_timeline,
-                    ref mut template_index,
                 } => {
-                    if template_preview_timeline.update().is_completed() {
-                        *template_index += 1;
-                        *template_preview_timeline =
-                            animations::upsell_templates::animation().begin_animation()
-                    }
-                    if progress_timeline.update().is_completed() {
+                    template_preview_timeline.update();
+                    if progress_timeline.update().is_completed()
+                        && template_preview_timeline.update().is_completed()
+                    {
                         self.state = MainAppState::EmailEntry;
                         self.emails = vec!["".to_string(); 1];
                         iced::widget::text_input::focus("email_input")
@@ -314,40 +298,29 @@ impl<
             },
             MainAppMessage::Uploaded(result) => {
                 log::debug!("Upload result received: {:?}", result);
-                match self.state {
-                    MainAppState::Uploading {
-                        ref mut progress_timeline,
-                    } => match result {
-                        Ok(res) => {
-                            self.upload_handle = Some(res);
-                            self.qr_code_data = Some(
-                                iced::widget::qr_code::Data::new(
-                                    server_backend
-                                        .get_link(self.upload_handle.as_ref().unwrap().clone()),
-                                )
-                                .expect("could not create qr code"),
-                            );
-                            *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
-                                .duration(Duration::from_millis(2000))
-                                .easing(
-                                    anim::easing::cubic_ease()
-                                        .mode(anim::easing::EasingMode::InOut),
-                                )
-                                .begin_animation();
-                            Task::none()
-                        }
-                        Err(err) => {
-                            self.state = MainAppState::PaymentRequired {
-                                error: Some(
-                                    "The photos could not be uploaded. Please try again."
-                                        .to_string(),
-                                ),
-                            };
-                            log::error!("Error uploading photos: {}", err);
-                            Task::none()
-                        }
-                    },
-                    _ => Task::none(),
+                match result {
+                    Ok(res) => {
+                        self.upload_handle = Some(res);
+                        self.qr_code_data = Some(
+                            iced::widget::qr_code::Data::with_version(
+                                server_backend
+                                    .get_link(self.upload_handle.as_ref().unwrap().clone()),
+                                QR_CODE_VERSION,
+                                iced::widget::qr_code::ErrorCorrection::Medium,
+                            )
+                            .expect("could not create qr code"),
+                        );
+                        Task::none()
+                    }
+                    Err(err) => {
+                        self.state = MainAppState::PaymentRequired {
+                            error: Some(
+                                "The photos could not be uploaded. Please try again.".to_string(),
+                            ),
+                        };
+                        log::error!("Error uploading photos: {}", err);
+                        Task::none()
+                    }
                 }
             }
             MainAppMessage::KeyReleased(key) => {
@@ -368,7 +341,7 @@ impl<
                         };
                         Task::none()
                     }
-                    MainAppState::EditPrintUpsellBanner {
+                    MainAppState::RenderedPreview {
                         progress_timeline, ..
                     } => {
                         *progress_timeline = anim::Options::new(progress_timeline.value(), 1.0)
@@ -408,7 +381,7 @@ impl<
                                 server_backend.send_email(upload_handle, self.emails.clone());
                             self.state = MainAppState::Emailing {
                                 progress_timeline: anim::Options::new(0.0, 1.0)
-                                    .duration(Duration::from_millis(5000))
+                                    .duration(Duration::from_millis(15000))
                                     .easing(
                                         anim::easing::cubic_ease()
                                             .mode(anim::easing::EasingMode::InOut),
@@ -503,7 +476,7 @@ impl<
                     container(
                         container(
                             column([
-                                iced::widget::text("CAJ 75th Anniversary Photo Booth")
+                                iced::widget::text("Photo Booth")
                                     .size(42)
                                     .style(|theme: &iced::Theme| iced::widget::text::Style {
                                         color: Some(theme.extended_palette().primary.base.text),
@@ -578,176 +551,205 @@ impl<
                 MainAppState::CapturePhotosPrepare { ready_timeline } => {
                     animations::ready::view(ready_timeline.value()).into()
                 }
-                MainAppState::CapturePhotos { current: _, state } => match state {
-                    CapturePhotosState::Countdown {
-                        current,
-                        countdown_timeline,
-                    } => animations::countdown_circle::view(*current, countdown_timeline.value())
-                        .into(),
-                    CapturePhotosState::Capture { capture_timeline } => {
-                        animations::capture_flash::view(capture_timeline.value()).into()
-                    }
-                    CapturePhotosState::Preview {
-                        preview_timeline,
-                        captured_handle,
-                    } => {
-                        animations::capture_preview::view(captured_handle, preview_timeline.value())
-                            .into()
-                    }
-                },
-                MainAppState::Uploading { progress_timeline } => title_overlay(
-                    iced::widget::column([
-                        container(
-                            loading_spinners::Circular::new()
-                                .size(96.0)
-                                .bar_height(10.0)
-                                .easing(&loading_spinners::easing::STANDARD_DECELERATE),
-                        )
-                        .center(Length::Fill)
-                        .into(),
-                        title_text("We're uploading your photos now.").into(),
-                        supporting_text("You'll be able to enter your email address(es) in a second.").into(),
-                        vertical_space().height(12.0).into(),
-                        progress_bar(0.0..=1.0, progress_timeline.value())
-                            .height(8.0)
+                MainAppState::CapturePhotos { current, state } => iced::widget::stack([
+                    status_overlay::status_overlay(text(format!("photo {} of {PHOTO_COUNT}", current + 1)).size(24)).into(),
+                    match state {
+                        CapturePhotosState::Countdown {
+                            current,
+                            countdown_timeline,
+                        } => animations::countdown_circle::view(*current, countdown_timeline.value())
                             .into(),
-                    ]),
-                    false,
-                )
-                .into(),
-                MainAppState::EditPrintUpsellBanner {
+                        CapturePhotosState::Capture { capture_timeline } => {
+                            animations::capture_flash::view(capture_timeline.value()).into()
+                        }
+                        CapturePhotosState::Preview {
+                            preview_timeline,
+                            captured_handle,
+                        } => {
+                            animations::capture_preview::view(captured_handle, preview_timeline.value())
+                                .into()
+                        }
+                    }
+                ]).into(),
+                MainAppState::RenderedPreview {
                     progress_timeline,
                     template_preview_timeline,
-                    template_index: _template_index,
-                } => title_overlay(
-                    column([
-                        animations::upsell_templates::view(
-                            //&self.previews[template_index % self.previews.len()],
-                            &self.strip_handle.as_ref().unwrap(),
-                            template_preview_timeline.value(),
-                        )
-                        .into(),
-                        title_text("Your photos are ready!").into(),
-                        supporting_text("On the next screen, enter your emails.").into(),
-                        vertical_space().height(12.0).into(),
-                        progress_bar(0.0..=1.0, progress_timeline.value())
-                            .height(4.0)
-                            .into(),
-                    ]),
-                    false,
-                )
-                .into(),
-                MainAppState::EmailEntry => title_overlay(
-                    row([
+                } => iced::widget::stack([
+                    title_overlay(
                         column([
-                            title_text("Enter your email addresses").into(),
-                            supporting_text("Start typing to add an email.").into(),
-                            vertical_space().height(12.0).into(),
-                            container(
-                                column([
-                                    row([
-                                        iced::widget::text_input(
-                                            "Enter an email",
-                                            self.emails[0].as_str(),
-                                        )
-                                        .on_input(MainAppMessage::EmailInput)
-                                        .on_submit(MainAppMessage::EmailSubmit)
-                                        .padding(10)
-                                        .size(24)
-                                        .id("email_input")
-                                        .into(),
-                                        horizontal_space().width(6.0).into(),
-                                        iced::widget::button(iced::widget::text(if self.emails[0].len() > 0 {
-                                            "Press [Enter] to add"
-                                        } else {
-                                            "Press [Enter] to finish"
-                                        })
-                                        .size(24))
-                                        .on_press(MainAppMessage::EmailSubmit)
-                                        .padding(10)
-                                        .into(),
-                                    ])
-                                    .into(),
-                                    vertical_space().height(12.0).into(),
-                                    container(
-                                        column(
-                                            self.emails
-                                                .iter()
-                                                .skip(1)
-                                                .map(|email| {
-                                                    iced::widget::container(
-                                                        iced::widget::text(email.as_str())
-                                                            .size(24)
-                                                    ).width(Length::Fill)
-                                                        .padding(10)
-                                                        .style(|theme: &iced::Theme| container::Style {
-                                                            background: Some(
-                                                                theme.extended_palette().background.strong.color.into(),
-                                                            ),
-                                                            text_color: Some(
-                                                                theme.extended_palette().background.strong.text,
-                                                            ),
-                                                            ..Default::default()
-                                                        }).into()
-                                                }),
-                                        ).push(vertical_space()).spacing(8),
-                                    )
-                                    .padding(12)
-                                    .style(|theme: &iced::Theme| container::Style {
-                                        background: Some(
-                                            theme.extended_palette().background.base.color.into(),
-                                        ),
-                                        ..Default::default()
-                                    })
-                                    .width(Length::Fill)
-                                    .center(Length::Fill)
-                                    .into(),
-                                    vertical_space().height(12.0).into(),
-                                    container(
-                                column([
-                                            iced::widget::text("Make sure your email provider accepts emails from photobooth@caj.ac.jp.")
-                                                .size(18)
-                                                .into(),
-                                            vertical_space().height(12.0).into(),
-                                            iced::widget::text("Alternatively, scan the QR code below to download your photos and press [ENTER] to continue.")
-                                                .size(14)
-                                                .into(),
-                                            container(
-                                                iced::widget::qr_code(&self.qr_code_data.as_ref().unwrap()).cell_size(8)
-                                            ).center(Length::Fill).into()
-                                        ])
-                                    ).height(Length::Fill).into()
-                                ])
-                                .align_x(Alignment::Center),
+                            animations::upsell_templates::view(
+                                &self.strip_handle.as_ref().unwrap(),
+                                template_preview_timeline.value(),
                             )
-                            .center(Length::Fill)
                             .into(),
-                        ])
-                        .padding(30)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .into(),
-                        horizontal_space().width(12.0).into(),
-                        column([
-                            supporting_text("Your photos").into(),
+                            title_text("Your photos are ready!").into(),
+                            supporting_text("On the next screen, enter your emails.").into(),
                             vertical_space().height(12.0).into(),
-                            iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
-                                .height(Length::Fill)
-                                .content_fit(ContentFit::Contain)
+                            progress_bar(0.0..=1.0, progress_timeline.value())
+                                .height(4.0)
                                 .into(),
-                        ])
-                        .align_x(Alignment::Center)
-                        .padding(30)
-                        .into(),
-                    ]),
-                    false,
-                ),
+                        ]),
+                        false,
+                    )
+                    .into(),
+                    status_overlay::status_overlay(row([
+                        loading_spinners::Circular::new()
+                            .size(30.0)
+                            .bar_height(3.0)
+                            .easing(&loading_spinners::easing::STANDARD_DECELERATE)
+                            .into(),
+                        text("Uploading photos in the background...").into()
+                    ]).spacing(8)).into()
+                ]).into(),
+                MainAppState::EmailEntry => iced::widget::stack([
+                    title_overlay(
+                        row([
+                            column([
+                                title_text("Enter your email addresses").into(),
+                                supporting_text("Start typing to add an email.").into(),
+                                vertical_space().height(12.0).into(),
+                                container(
+                                    column([
+                                        row([
+                                            iced::widget::text_input(
+                                                "Enter an email",
+                                                self.emails[0].as_str(),
+                                            )
+                                            .on_input(MainAppMessage::EmailInput)
+                                            .on_submit(MainAppMessage::EmailSubmit)
+                                            .padding(10)
+                                            .size(24)
+                                            .id("email_input")
+                                            .into(),
+                                            horizontal_space().width(6.0).into(),
+                                            iced::widget::button(iced::widget::text(if self.emails[0].len() > 0 {
+                                                "Press [Enter] to add"
+                                            } else {
+                                                "Press [Enter] to finish"
+                                            })
+                                            .size(24))
+                                            .on_press_maybe(
+                                                if self.upload_handle.is_none() && self.emails[0].len() == 0 {
+                                                    None
+                                                } else {
+                                                    Some(MainAppMessage::EmailSubmit)
+                                                }
+                                            )
+                                            .padding(10)
+                                            .into(),
+                                        ])
+                                        .into(),
+                                        vertical_space().height(12.0).into(),
+                                        container(
+                                            column(
+                                                self.emails
+                                                    .iter()
+                                                    .skip(1)
+                                                    .map(|email| {
+                                                        iced::widget::container(
+                                                            iced::widget::text(email.as_str())
+                                                                .size(24)
+                                                        ).width(Length::Fill)
+                                                            .padding(10)
+                                                            .style(|theme: &iced::Theme| container::Style {
+                                                                background: Some(
+                                                                    theme.extended_palette().background.strong.color.into(),
+                                                                ),
+                                                                text_color: Some(
+                                                                    theme.extended_palette().background.strong.text,
+                                                                ),
+                                                                ..Default::default()
+                                                            }).into()
+                                                    }),
+                                            ).push(vertical_space()).spacing(8),
+                                        )
+                                        .padding(12)
+                                        .style(|theme: &iced::Theme| container::Style {
+                                            background: Some(
+                                                theme.extended_palette().background.base.color.into(),
+                                            ),
+                                            ..Default::default()
+                                        })
+                                        .width(Length::Fill)
+                                        .center(Length::Fill)
+                                        .into(),
+                                        vertical_space().height(12.0).into(),
+                                        container(
+                                            column([
+                                                iced::widget::text("Make sure your email provider accepts emails from photobooth@caj.ac.jp.")
+                                                    .size(18)
+                                                    .into(),
+                                                vertical_space().height(12.0).into(),
+                                                iced::widget::text("Alternatively, scan the QR code below to download your photos and press [ENTER] to continue.")
+                                                    .size(14)
+                                                    .into(),
+                                                if let Some(ref qr_code_data) = self.qr_code_data {
+                                                    container(
+                                                        iced::widget::qr_code(qr_code_data).cell_size(8).style(|_|iced::widget::qr_code::Style {
+                                                            background: Color::WHITE,
+                                                            cell: Color::BLACK
+                                                        })
+                                                    ).center((QR_CODE_SIDE_LENGTH * 8) as u16).into()
+                                                } else {
+                                                    container(
+                                                        column([
+                                                            loading_spinners::Circular::new()
+                                                                .size(40.0)
+                                                                .bar_height(4.0)
+                                                                .easing(&loading_spinners::easing::STANDARD_DECELERATE)
+                                                                .into(),
+                                                            text("Uploading and generating code...").into()
+                                                        ])
+                                                        .align_x(Alignment::Center)
+                                                        .spacing(8)
+                                                    ).style(|_| container::background(Color::WHITE)).center((QR_CODE_SIDE_LENGTH * 8) as u16).into()
+                                                }
+                                            ]).align_x(Alignment::Center)
+                                        ).height(Length::Fill).into()
+                                    ])
+                                    .align_x(Alignment::Center),
+                                )
+                                .center(Length::Fill)
+                                .into(),
+                            ])
+                            .padding(30)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .into(),
+                            horizontal_space().width(12.0).into(),
+                            column([
+                                supporting_text("Your photos").into(),
+                                vertical_space().height(12.0).into(),
+                                iced::widget::image(self.strip_handle.as_ref().unwrap().clone())
+                                    .height(Length::Fill)
+                                    .content_fit(ContentFit::Contain)
+                                    .into(),
+                            ])
+                            .align_x(Alignment::Center)
+                            .padding(30)
+                            .into(),
+                        ]),
+                        false,
+                    ).into(),
+                    if self.upload_handle.is_none() {
+                        status_overlay::status_overlay(row([
+                            loading_spinners::Circular::new()
+                                .size(40.0)
+                                .bar_height(4.0)
+                                .easing(&loading_spinners::easing::STANDARD_DECELERATE)
+                                .into(),
+                            text("Uploading photos in the background...").into()
+                        ]).spacing(8)).into()
+                    } else {
+                        "".into()
+                    }
+                ]).into(),
                 MainAppState::Emailing { progress_timeline } => title_overlay(
                     iced::widget::column([
                         container(
                             loading_spinners::Circular::new()
-                                .size(96.0)
-                                .bar_height(10.0)
+                                .size(40.0)
+                                .bar_height(4.0)
                                 .easing(&loading_spinners::easing::STANDARD_DECELERATE),
                         )
                         .center(Length::Fill)

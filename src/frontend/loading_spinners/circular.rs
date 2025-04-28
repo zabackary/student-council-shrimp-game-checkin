@@ -8,10 +8,7 @@ use iced::mouse;
 use iced::time::Instant;
 use iced::widget::canvas;
 use iced::window::{self, RedrawRequest};
-use iced::{
-    Background, Color, Element, Event, Length, Radians, Rectangle, Renderer,
-    Size, Vector,
-};
+use iced::{Background, Color, Element, Event, Length, Radians, Rectangle, Renderer, Size, Vector};
 
 use super::easing::{self, Easing};
 
@@ -137,12 +134,9 @@ impl Animation {
             Self::Contracting { rotation, .. } => Self::Expanding {
                 start: now,
                 progress: 0.0,
-                rotation: rotation.wrapping_add(
-                    BASE_ROTATION_SPEED.wrapping_add(
-                        (f64::from(WRAP_ANGLE / (2.0 * Radians::PI))
-                            * u32::MAX as f64) as u32,
-                    ),
-                ),
+                rotation: rotation.wrapping_add(BASE_ROTATION_SPEED.wrapping_add(
+                    (f64::from(WRAP_ANGLE / (2.0 * Radians::PI)) * u32::MAX as f64) as u32,
+                )),
                 last: now,
             },
         }
@@ -150,17 +144,13 @@ impl Animation {
 
     fn start(&self) -> Instant {
         match self {
-            Self::Expanding { start, .. } | Self::Contracting { start, .. } => {
-                *start
-            }
+            Self::Expanding { start, .. } | Self::Contracting { start, .. } => *start,
         }
     }
 
     fn last(&self) -> Instant {
         match self {
-            Self::Expanding { last, .. } | Self::Contracting { last, .. } => {
-                *last
-            }
+            Self::Expanding { last, .. } | Self::Contracting { last, .. } => *last,
         }
     }
 
@@ -176,15 +166,8 @@ impl Animation {
             * (u32::MAX) as f32) as u32;
 
         match elapsed {
-            elapsed if elapsed > cycle_duration => {
-                self.next(additional_rotation, now)
-            }
-            _ => self.with_elapsed(
-                cycle_duration,
-                additional_rotation,
-                elapsed,
-                now,
-            ),
+            elapsed if elapsed > cycle_duration => self.next(additional_rotation, now),
+            _ => self.with_elapsed(cycle_duration, additional_rotation, elapsed, now),
         }
     }
 
@@ -218,8 +201,7 @@ impl Animation {
 
     fn rotation(&self) -> f32 {
         match self {
-            Self::Expanding { rotation, .. }
-            | Self::Contracting { rotation, .. } => {
+            Self::Expanding { rotation, .. } | Self::Contracting { rotation, .. } => {
                 *rotation as f32 / u32::MAX as f32
             }
         }
@@ -232,8 +214,7 @@ struct State {
     cache: canvas::Cache,
 }
 
-impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
-    for Circular<'a, Theme>
+impl<'a, Message, Theme> Widget<Message, Theme, Renderer> for Circular<'a, Theme>
 where
     Message: 'a + Clone,
     Theme: StyleSheet,
@@ -276,11 +257,10 @@ where
         let state = tree.state.downcast_mut::<State>();
 
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
-            state.animation = state.animation.timed_transition(
-                self.cycle_duration,
-                self.rotation_duration,
-                now,
-            );
+            state.animation =
+                state
+                    .animation
+                    .timed_transition(self.cycle_duration, self.rotation_duration, now);
 
             state.cache.clear();
             shell.request_redraw(RedrawRequest::NextFrame);
@@ -303,45 +283,55 @@ where
 
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let custom_style =
-            <Theme as StyleSheet>::appearance(theme, &self.style);
+        let custom_style = <Theme as StyleSheet>::appearance(theme, &self.style);
 
         let geometry = state.cache.draw(renderer, bounds.size(), |frame| {
             let track_radius = frame.width() / 2.0 - self.bar_height;
             let track_path = canvas::Path::circle(frame.center(), track_radius);
 
-            frame.stroke(
-                &track_path,
-                canvas::Stroke::default()
-                    .with_color(custom_style.track_color)
-                    .with_width(self.bar_height),
-            );
-
             let mut builder = canvas::path::Builder::new();
 
             let start = Radians(state.animation.rotation() * 2.0 * PI);
 
-            match state.animation {
-                Animation::Expanding { progress, .. } => {
-                    builder.arc(canvas::path::Arc {
-                        center: frame.center(),
-                        radius: track_radius,
-                        start_angle: start,
-                        end_angle: start
-                            + MIN_ANGLE
-                            + WRAP_ANGLE * (self.easing.y_at_x(progress)),
-                    });
-                }
-                Animation::Contracting { progress, .. } => {
-                    builder.arc(canvas::path::Arc {
-                        center: frame.center(),
-                        radius: track_radius,
-                        start_angle: start
-                            + WRAP_ANGLE * (self.easing.y_at_x(progress)),
-                        end_angle: start + MIN_ANGLE + WRAP_ANGLE,
-                    });
-                }
-            }
+            let (start_angle, end_angle) = match state.animation {
+                Animation::Expanding { progress, .. } => (
+                    start,
+                    start + MIN_ANGLE + WRAP_ANGLE * (self.easing.y_at_x(progress)),
+                ),
+                Animation::Contracting { progress, .. } => (
+                    start + WRAP_ANGLE * (self.easing.y_at_x(progress)),
+                    start + MIN_ANGLE + WRAP_ANGLE,
+                ),
+            };
+
+            // Material design rounded ends
+            frame.fill(
+                &canvas::Path::circle(
+                    iced::Point {
+                        x: frame.center().x + start_angle.0.cos() * track_radius,
+                        y: frame.center().y + start_angle.0.sin() * track_radius,
+                    },
+                    self.bar_height / 2.0,
+                ),
+                custom_style.bar_color,
+            );
+            frame.fill(
+                &canvas::Path::circle(
+                    iced::Point {
+                        x: frame.center().x + end_angle.0.cos() * track_radius,
+                        y: frame.center().y + end_angle.0.sin() * track_radius,
+                    },
+                    self.bar_height / 2.0,
+                ),
+                custom_style.bar_color,
+            );
+
+            builder.arc(canvas::path::Arc {
+                center: frame.center(),
+                radius: track_radius,
+                start_angle,
+                end_angle,
+            });
 
             let bar_path = builder.build();
 
@@ -353,19 +343,15 @@ where
             );
         });
 
-        renderer.with_translation(
-            Vector::new(bounds.x, bounds.y),
-            |renderer| {
-                use iced::advanced::graphics::geometry::Renderer as _;
+        renderer.with_translation(Vector::new(bounds.x, bounds.y), |renderer| {
+            use iced::advanced::graphics::geometry::Renderer as _;
 
-                renderer.draw_geometry(geometry);
-            },
-        );
+            renderer.draw_geometry(geometry);
+        });
     }
 }
 
-impl<'a, Message, Theme> From<Circular<'a, Theme>>
-    for Element<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme> From<Circular<'a, Theme>> for Element<'a, Message, Theme, Renderer>
 where
     Message: Clone + 'a,
     Theme: StyleSheet + 'a,
