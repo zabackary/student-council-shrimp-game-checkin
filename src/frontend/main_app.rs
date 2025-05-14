@@ -108,9 +108,7 @@ impl<
                 new_page: None,
                 captured_photos: Vec::with_capacity(PHOTO_COUNT),
                 previews: Vec::with_capacity(PHOTO_COUNT),
-                logo_handle: Handle::from_bytes(
-                    include_bytes!("../../assets/75thAnniversaryLogo.jpg").to_vec(),
-                ),
+                logo_handle: Handle::from_bytes(include_bytes!("../../assets/banner.png").to_vec()),
                 strip: None,
                 strip_handle: None,
                 qr_code_data: None,
@@ -367,6 +365,10 @@ impl<
             }
             MainAppMessage::EmailSubmit => {
                 log::debug!("Email submit triggered. Current emails: {:?}", self.emails);
+                if self.upload_handle.is_none() {
+                    log::warn!("Didn't finish uploading.");
+                    return Task::none();
+                }
                 if self.emails[0].len() > 0 {
                     self.emails.splice(0..0, ["".to_string()]);
                     Task::none()
@@ -476,16 +478,10 @@ impl<
                     container(
                         container(
                             column([
-                                iced::widget::text("Photo Booth")
-                                    .size(42)
-                                    .style(|theme: &iced::Theme| iced::widget::text::Style {
-                                        color: Some(theme.extended_palette().primary.base.text),
-                                    })
-                                    .into(),
                                 vertical_space().height(6).into(),
                                 iced::widget::image(self.logo_handle.clone())
-                                    .width(500)
-                                    .height(500)
+                                    .width(800)
+                                    .height(300)
                                     .content_fit(ContentFit::Contain)
                                     .into(),
                                 vertical_space().height(6).into(),
@@ -503,12 +499,12 @@ impl<
                                         container(column([iced::widget::text(
                                             error_message
                                         )
-                                        .size(12)
+                                        .size(16)
                                         .into()]))
                                         .style(|theme: &iced::Theme| container::Style {
                                             border: iced::Border::default().rounded(4.0).color(
                                                 theme.extended_palette().danger.strong.color,
-                                            ),
+                                            ).width(1.0),
                                             background: Some(
                                                 theme.extended_palette().danger.weak.color.into(),
                                             ),
@@ -641,27 +637,54 @@ impl<
                                         .into(),
                                         vertical_space().height(12.0).into(),
                                         container(
-                                            column(
-                                                self.emails
-                                                    .iter()
-                                                    .skip(1)
-                                                    .map(|email| {
-                                                        iced::widget::container(
-                                                            iced::widget::text(email.as_str())
-                                                                .size(24)
-                                                        ).width(Length::Fill)
-                                                            .padding(10)
-                                                            .style(|theme: &iced::Theme| container::Style {
-                                                                background: Some(
-                                                                    theme.extended_palette().background.strong.color.into(),
-                                                                ),
-                                                                text_color: Some(
-                                                                    theme.extended_palette().background.strong.text,
-                                                                ),
-                                                                ..Default::default()
-                                                            }).into()
-                                                    }),
-                                            ).push(vertical_space()).spacing(8),
+                                            if self.emails.len() <= 1 {
+                                                Element::from(column([
+                                                    text("You can also scan the QR code to download your photos!").into(),
+                                                    Element::from(if let Some(ref qr_code_data) = self.qr_code_data {
+                                                        container(
+                                                            iced::widget::qr_code(qr_code_data).cell_size(8).style(|_|iced::widget::qr_code::Style {
+                                                                background: Color::WHITE,
+                                                                cell: Color::BLACK
+                                                            })
+                                                        ).center((QR_CODE_SIDE_LENGTH * 8) as u16).padding(8)
+                                                    } else {
+                                                        container(
+                                                            column([
+                                                                loading_spinners::Circular::new()
+                                                                    .size(40.0)
+                                                                    .bar_height(4.0)
+                                                                    .easing(&loading_spinners::easing::STANDARD_DECELERATE)
+                                                                    .into(),
+                                                                text("Uploading and generating code...").into()
+                                                            ])
+                                                            .align_x(Alignment::Center)
+                                                            .spacing(8)
+                                                        ).style(|_| container::background(Color::WHITE)).padding(8).center((QR_CODE_SIDE_LENGTH * 8) as u16)
+                                                    })
+                                                ]).spacing(16).padding(4).align_x(Alignment::Center))
+                                            } else {
+                                                column(
+                                                    self.emails
+                                                        .iter()
+                                                        .skip(1)
+                                                        .map(|email| {
+                                                            iced::widget::container(
+                                                                iced::widget::text(email.as_str())
+                                                                    .size(24)
+                                                            ).width(Length::Fill)
+                                                                .padding(10)
+                                                                .style(|theme: &iced::Theme| container::Style {
+                                                                    background: Some(
+                                                                        theme.extended_palette().background.strong.color.into(),
+                                                                    ),
+                                                                    text_color: Some(
+                                                                        theme.extended_palette().background.strong.text,
+                                                                    ),
+                                                                    ..Default::default()
+                                                                }).into()
+                                                        }),
+                                                ).push(vertical_space()).spacing(8).into()
+                                            },
                                         )
                                         .padding(12)
                                         .style(|theme: &iced::Theme| container::Style {
@@ -679,31 +702,6 @@ impl<
                                                 iced::widget::text("Make sure your email provider accepts emails from photobooth@caj.ac.jp.")
                                                     .size(18)
                                                     .into(),
-                                                vertical_space().height(12.0).into(),
-                                                iced::widget::text("Alternatively, scan the QR code below to download your photos and press [ENTER] to continue.")
-                                                    .size(14)
-                                                    .into(),
-                                                if let Some(ref qr_code_data) = self.qr_code_data {
-                                                    container(
-                                                        iced::widget::qr_code(qr_code_data).cell_size(8).style(|_|iced::widget::qr_code::Style {
-                                                            background: Color::WHITE,
-                                                            cell: Color::BLACK
-                                                        })
-                                                    ).center((QR_CODE_SIDE_LENGTH * 8) as u16).into()
-                                                } else {
-                                                    container(
-                                                        column([
-                                                            loading_spinners::Circular::new()
-                                                                .size(40.0)
-                                                                .bar_height(4.0)
-                                                                .easing(&loading_spinners::easing::STANDARD_DECELERATE)
-                                                                .into(),
-                                                            text("Uploading and generating code...").into()
-                                                        ])
-                                                        .align_x(Alignment::Center)
-                                                        .spacing(8)
-                                                    ).style(|_| container::background(Color::WHITE)).center((QR_CODE_SIDE_LENGTH * 8) as u16).into()
-                                                }
                                             ]).align_x(Alignment::Center)
                                         ).height(Length::Fill).into()
                                     ])
@@ -734,8 +732,8 @@ impl<
                     if self.upload_handle.is_none() {
                         status_overlay::status_overlay(row([
                             loading_spinners::Circular::new()
-                                .size(40.0)
-                                .bar_height(4.0)
+                                .size(30.0)
+                                .bar_height(3.0)
                                 .easing(&loading_spinners::easing::STANDARD_DECELERATE)
                                 .into(),
                             text("Uploading photos in the background...").into()
